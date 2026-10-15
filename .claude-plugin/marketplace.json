@@ -1,0 +1,14 @@
+{
+  "name": "leitstand",
+  "owner": {
+    "name": "s16e"
+  },
+  "description": "Leitstand: zentraler Workflow für Vorhaben, Fragerunden und Übergaben.",
+  "plugins": [
+    {
+      "name": "leitstand",
+      "source": "./plugins/leitstand",
+      "description": "Leitstand-Workflow und MCP-Verbindung zu leitstand.s16e.de."
+    }
+  ]
+}

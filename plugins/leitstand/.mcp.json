@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "leitstand": {
+      "type": "http",
+      "url": "https://leitstand.s16e.de/mcp"
+    }
+  }
+}
