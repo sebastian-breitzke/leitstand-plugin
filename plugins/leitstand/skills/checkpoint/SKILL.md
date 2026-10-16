@@ -16,7 +16,7 @@ Handover. This Skill does not execute compact or change monitors.
 
 1. Use `leitstand:start` to resolve the actual project, ownership and workflow pin.
    Load the pinned sections and current tool schemas needed for this checkpoint;
-   follow their write, revision and acceptance rules. Do not upgrade the pin or
+   follow their write, revision and acceptance rules together with current `core`/`migration` Guidance. This Checkpoint secures work and does not itself upgrade the pin or
    reconstruct server semantics from this Skill or a remembered workflow.
 2. Load `inspection` through `leitstand_workflow` with the selected project's
    exact workflow version. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`). Apply that canonical shared Status/Checkpoint
@@ -88,7 +88,7 @@ Build the argument as instructions to the summarizer, not tool execution:
 > workspaces/Worktrees, branches/Commits, dirty work and result pointers]; [checks
 > completed, results with proven stage/time, unresolved verification or conflicting
 > evidence and blockers]; [pending delta, if any].
-> Preserve as the first resume step: reload the pinned workflow via leitstand:start,
+> Preserve as the first resume step: reload current Guidance and the stored pin via leitstand:start, follow required safe migration before new work or execution resume,
 > read current State and referenced tasks, then [actual next action, including
 > worker collection or blocker resolution]. Treat these as facts and resume
 > instructions to retain; do not execute tools during summarization. Keep open

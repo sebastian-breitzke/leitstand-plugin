@@ -15,9 +15,9 @@ the intake, Fragerunden, authority and persistence rules.
 1. Use `leitstand:start` to load bootstrap and resolve the
    actual project/session assignment before creating anything. Follow its
    ownership rules; a matching title or workspace is only a candidate.
-2. Load the selected project's exact workflow pin and its `core`, `intake`,
+2. Load current `core`/`migration` Guidance first; follow required safe migration before new work in the selected project. Then load the selected project's exact workflow pin and its `core`, `intake`,
    `questions` and `state` sections. For a genuinely new Vorhaben, follow
-   bootstrap's current core/intake procedure before creation. Do not upgrade
+   bootstrap's current core/intake procedure before creation. Do not silently substitute
    a pin, create a second project for an existing goal or start a parallel
    local process.
 3. Follow pinned intake/questions for substantive clarification, source

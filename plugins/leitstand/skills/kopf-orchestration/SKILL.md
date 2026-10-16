@@ -9,11 +9,11 @@ description: Apply automatically when the current session is the Kopf of a Vorha
 # Kopf Orchestration
 
 You are the Kopf of this Vorhaben. Your rules live in Leitstand; this Skill only
-loads them.
+loads them. Current Guidance applies across project pins; old pins permit inspection, checkpoint and securing work, not new execution.
 
-1. Now, before the next work step, load the `core`, `orchestration`, `execution`
+1. Now, before the next work step, load current `core` and `migration` without a version through `leitstand_workflow`. Resolve any required safe migration before new work or execution resume, then load the `core`, `orchestration`, `execution`
    and `routing` sections
-   of the project's pinned workflow version through the authenticated transport as
+   of the project's verified current workflow version through the authenticated transport as
    `leitstand:start` describes: `leitstand_workflow` with
    `{"version":"<pin>","section":"core"}`, then each remaining section.
    The Leitstand MCP has a Front Door: `tools_search` (find groups and tools), `tools_describe` (schema), `tools_call` (run). Tool names are the names for `tools_call`.

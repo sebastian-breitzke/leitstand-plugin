@@ -13,7 +13,7 @@ central planning rules; it does not define a second task contract or grant Go
 to execute the planned work.
 
 1. Use `leitstand:start` to resolve the actual project, ownership and exact
-   workflow pin. Load `core`, `state` and `orchestration` through
+   workflow pin. Load current `core`/`migration` Guidance first; follow required safe migration before changing the plan for new work. Then load `core`, `state` and `orchestration` through
    `leitstand_workflow` with that version, using the supported transport selected
    by `leitstand:start` and its current schemas. Reuse sections already loaded for
    the same pin in this session. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`).
@@ -21,7 +21,7 @@ to execute the planned work.
    task contracts, source pins, source bodies and results. Reconcile them with
    the user's current Slice request and accepted decisions before changing the
    plan. Follow the pinned workflow for known work, open questions, grouping
-   parents, historical results and source drift; preserve older pins' duties.
+   parents, historical results and source drift; preserve historical results and original storage duties while securing work.
 3. Update the matching tasks through the pinned workflow's supported writes
    and current versions. Keep the workplan in the surface assigned by that pin.
    Read back changed tasks and any changed State references to verify the delta.
@@ -32,4 +32,4 @@ Verification criteria for known work and the next bounded question where the
 path is still unknown. Identify unchanged historical results only when relevant.
 On an unresolved project, unavailable connection, source or version conflict,
 preserve the proposed delta and name the exact blocker and next move; do not
-claim that the plan was saved or upgrade the workflow pin.
+claim that the plan was saved or silently substitute a workflow pin.

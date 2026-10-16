@@ -24,7 +24,7 @@ The Leitstand MCP has a Front Door: `tools_search` (find groups and tools), `too
 Load the connected service's current entry instructions before selecting or
 creating a project: describe `leitstand_workflow` and call it through `tools_call` with
 `section: "bootstrap"`, omitting `version`. Follow that section to resolve the
-project and load its pinned workflow. Refresh the entry instructions when
+project and load current `core`/`migration` Guidance plus its exact history pin. Current Guidance applies across pins; before new work or execution resume, follow the required safe migration. Read-only Status does not upgrade. Refresh the entry instructions when
 resuming after a handover or when the service announces a workflow change.
 
 The server owns workflow rules and durable State. This local Skill is only a

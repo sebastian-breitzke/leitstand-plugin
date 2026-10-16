@@ -13,7 +13,7 @@ The pinned `handover` section owns preservation, observed stop, source access,
 registration/transfer, failure handling, resume and continuation requirements.
 
 1. Use `leitstand:start` to resolve the actual project, ownership and exact workflow
-   pin. Load its manifest and `handover` section, then only the sections and tool
+   pin. Load current `core`/`migration` Guidance first. Handover secures existing work; execution resume requires safe migration. Load its manifest and `handover` section, then only the sections and tool
    schemas that path requires. Do not substitute or silently upgrade the pin.
 2. Only on an executable pin whose manifest exposes `inspection`, use
    `leitstand:checkpoint` and that shared foundation for reconciliation,

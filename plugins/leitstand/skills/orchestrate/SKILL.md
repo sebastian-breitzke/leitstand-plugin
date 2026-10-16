@@ -12,11 +12,11 @@ Start or resume the accepted work as Kopf. This Skill loads central execution
 guidance; invoking it does not authorize an unaccepted direction.
 
 1. Use `leitstand:start` to resolve the actual project, ownership and exact
-   workflow pin. Load `core`, `orchestration`, `execution` and `routing` through
+   workflow pin. Load current `core` and `migration` without a version; complete the required safe migration before new dispatch, active work or execution resume. Then load `core`, `orchestration`, `execution` and `routing` through
    `leitstand_workflow` at that version, using the supported transport and current
    schemas. These are the same sections `kopf-orchestration` loads. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`). Reuse them
    within the same wave; after resume or compaction reload them before work.
-2. Follow the pinned start/resume and dispatch rules. Read current State,
+2. Follow the current start/resume and dispatch rules. Read current State,
    relevant stored task contracts and source bodies; reconcile Auftrag and Go
    with actual ownership and exposed runtime capacity before dispatch. Keep
    task, brief, model, effort, Context and return-point rules in that workflow.
