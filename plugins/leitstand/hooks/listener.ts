@@ -13,11 +13,13 @@ const MAX_MESSAGE = 8 * 1024
 const KEEP_STATE_MS = 2 * 24 * 3600_000
 // A session's first Watch snapshot lists open state, not news: informational deployment notices older than this are
 // only acknowledged (cursor advance), they do not wake. One hour is far beyond clock skew and delivery lag between
-// server and client, yet a session that starts minutes after a release still hears about it.
+// server and client, yet a session that starts minutes after a release still hears about it. The state stays readable
+// through leitstand_deployments. `S.snapshot` lives in memory: after a mod reload mid-snapshot the rest is not filtered.
 const STALE_MS = 3600_000
-// Informational kinds the stale rule may skip. Posts, Fix notices, announcements, holds and overview requests are
-// directed or still open and always wake; an unknown kind also wakes.
-const INFORMATIONAL = new Set(['target_created', 'repositories_added', 'request_queued', 'hold_created', 'hold_released',
+// Informational kinds the stale rule may skip. Posts, Fix notices, announcements, overview requests and open holds
+// (repository holds, and `hold_created`: the snapshot carries a Target's latest event, so a Deployment hold stays
+// blocking until `hold_released`) are directed or still open and always wake; an unknown kind also wakes.
+const INFORMATIONAL = new Set(['target_created', 'repositories_added', 'request_queued', 'hold_released',
   'release_claimed', 'release_started', 'release_finished', 'request_cancelled'])
 // `$.mcp.call` passes the person's permission rules like a tool call; these need an allow rule.
 const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand__leitstand_session, ' +
@@ -264,8 +266,8 @@ async function tick($: EngineInterface, mine: number) {
         && !(once(e) && delivered.includes(e.id)) && !(initial && stale(e, asked)))
       if (!events.length) {
         await update($, state => { state.cursors[slot] = after })
-        // Only replayed Posts: the server answered at once; wait out the rest of the poll.
-        if (value.events.length) delay = Math.max(delay, wait - ((await $.clock.now()) - asked))
+        // Only replayed or filtered events: the server answered at once; wait out the rest of the poll unless more pages follow.
+        if (value.events.length && value.hasMore !== true) delay = Math.max(delay, wait - ((await $.clock.now()) - asked))
         continue
       }
       const posts: Record<string, string> = {}
