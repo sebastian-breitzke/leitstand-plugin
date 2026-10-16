@@ -16,7 +16,7 @@ to execute the planned work.
    workflow pin. Load `core`, `state` and `orchestration` through
    `leitstand_workflow` with that version, using the supported transport selected
    by `leitstand:start` and its current schemas. Reuse sections already loaded for
-   the same pin in this session.
+   the same pin in this session. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`).
 2. Read current State and the existing task tree, then the relevant stored
    task contracts, source pins, source bodies and results. Reconcile them with
    the user's current Slice request and accepted decisions before changing the

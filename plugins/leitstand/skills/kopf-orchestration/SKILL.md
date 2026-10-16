@@ -16,6 +16,7 @@ loads them.
    of the project's pinned workflow version through the authenticated transport as
    `leitstand:start` describes: `leitstand_workflow` with
    `{"version":"<pin>","section":"core"}`, then each remaining section.
+   The Leitstand MCP has a Front Door: `tools_search` (find groups and tools), `tools_describe` (schema), `tools_call` (run). Tool names are the names for `tools_call`.
    If the project or its pin is not resolved yet, run the `leitstand:start`
    bootstrap first.
 2. Follow the Kopf job in `core` and the dispatch, task tree, brief and delivery

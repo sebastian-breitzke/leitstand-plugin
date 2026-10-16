@@ -19,7 +19,7 @@ Handover. This Skill does not execute compact or change monitors.
    follow their write, revision and acceptance rules. Do not upgrade the pin or
    reconstruct server semantics from this Skill or a remembered workflow.
 2. Load `inspection` through `leitstand_workflow` with the selected project's
-   exact workflow version. Apply that canonical shared Status/Checkpoint
+   exact workflow version. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`). Apply that canonical shared Status/Checkpoint
    foundation; do not maintain a second inspection checklist here. If the
    section cannot be loaded, report the exact failure and defer rather than
    substitute a remembered checklist or silently upgrade the pin.
@@ -68,8 +68,11 @@ Return in this order:
    Include it even when deferred, clearly marked for use after the named blocker
    is resolved; preserve the blocker rather than describing it as solved.
 
-For Claude Code, emit exactly one block beginning `/compact ` followed by the
-fully populated instructions. Its documented syntax is `/compact [instructions]`
+For Claude Code, emit exactly one block holding only the fully populated
+instructions, without a leading `/compact `. Sebastian pastes the block into the
+compact instructions field or after `/compact` that he types himself; a pasted
+`/compact ` prefix is taken as plain text and must be deleted by hand. Its
+documented syntax is `/compact [instructions]`
 ([official commands](https://code.claude.com/docs/en/commands), checked 2026-10-14).
 For other clients, verify their syntax and argument support before emitting a
 command; if unverified, provide the argument text alone and state that limit.

@@ -12,14 +12,12 @@ Starte danach eine neue Session und öffne `/mcp`, um die Verbindung im Browser 
 braucht es einen Account auf leitstand.s16e.de.
 
 Der Listener des Plugins weckt eine wartende Session, sobald im Leitstand eine Post für sie eintrifft
-(Claude Code 2.1.295 oder neuer); beim Sessionstart bestätigt er Deployment-Hinweise, die älter als eine Stunde sind (weit über Uhr- und Zustellversatz), nur still, der Stand bleibt über `leitstand_deployments` lesbar; Posts, Fix-Hinweise und offene Holds wecken weiter. Seine eigenen Aufrufe laufen über deine Berechtigungsregeln; gib sie
-einmalig in `~/.claude/settings.json` frei (`/leitstand:start` bietet das Eintragen nach deiner Bestätigung an):
+(Claude Code 2.1.295 oder neuer); beim Sessionstart bestätigt er Deployment-Hinweise, die älter als eine Stunde sind (weit über Uhr- und Zustellversatz), nur still, der Stand bleibt über `leitstand_deployments` (per `tools_call`) lesbar; Posts, Fix-Hinweise und offene Holds wecken weiter. Seine eigenen Aufrufe laufen über deine Berechtigungsregeln; gib sie
+einmalig in `~/.claude/settings.json` frei (`/leitstand:start` bietet das Eintragen nach deiner Bestätigung an).
+Der Leitstand-MCP hat eine Front Door (`tools_search`, `tools_describe`, `tools_call`); eine serverweite Regel genügt:
 
 ```json
-{"permissions": {"allow": ["mcp__plugin_leitstand_leitstand__leitstand_session",
-  "mcp__plugin_leitstand_leitstand__leitstand_guidance", "mcp__plugin_leitstand_leitstand__leitstand_watch",
-  "mcp__plugin_leitstand_leitstand__leitstand_post_receive",
-  "mcp__plugin_leitstand_leitstand__leitstand_repository_fix_ack"]}}
+{"permissions": {"allow": ["mcp__plugin_leitstand_leitstand"]}}
 ```
 
 Befehle: `/leitstand:start`, `/leitstand:status`, `/leitstand:brainstorm`, `/leitstand:slice`,

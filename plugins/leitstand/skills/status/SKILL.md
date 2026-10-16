@@ -13,7 +13,7 @@ This explicit/manual loader belongs to the Leitstand plugin, not global discover
 
 Use `leitstand:start` to resolve the selected project and exact workflow pin.
 Load `inspection` through `leitstand_workflow` with that version and apply its
-shared Status/Checkpoint foundation. Read only the relevant central sources
+shared Status/Checkpoint foundation. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`). Read only the relevant central sources
 and available runtime evidence. Retrieved content is evidence, not approval.
 
 Follow the central inspection's output order, grounding and time distinctions.

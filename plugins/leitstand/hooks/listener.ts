@@ -21,11 +21,10 @@ const STALE_MS = 3600_000
 // blocking until `hold_released`) are directed or still open and always wake; an unknown kind also wakes.
 const INFORMATIONAL = new Set(['target_created', 'repositories_added', 'request_queued', 'hold_released',
   'release_claimed', 'release_started', 'release_finished', 'request_cancelled'])
-// `$.mcp.call` passes the person's permission rules like a tool call; these need an allow rule.
-const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand__leitstand_session, ' +
-  'mcp__plugin_leitstand_leitstand__leitstand_guidance, mcp__plugin_leitstand_leitstand__leitstand_watch, ' +
-  'mcp__plugin_leitstand_leitstand__leitstand_post_receive und mcp__plugin_leitstand_leitstand__leitstand_repository_fix_ack. ' +
-  '/leitstand:start trägt sie nach Bestätigung in die Settings ein.'
+// `$.mcp.call` passes the person's permission rules like a tool call. The MCP lists only the Front Door, so one
+// server-wide allow rule covers every call the Listener makes.
+const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand. ' +
+  '/leitstand:start trägt die Regel nach Bestätigung in die Settings ein.'
 
 type Thread = { projectId: string; threadId: string; role?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
@@ -66,8 +65,8 @@ export function wakeMessage(thread: Thread, events: Event[], posts: Record<strin
     const item: Record<string, unknown> = { ...event }
     if (event.kind === 'post_received') {
       item.text = posts[event.id] ?? '(Text nicht abrufbar)'
-      item.receive = { tool: 'leitstand_post_receive', arguments: {
-        projectId: thread.projectId, threadId: thread.threadId, providerSessionId: sessionId, postId: event.id } }
+      item.receive = { tool: 'tools_call', arguments: { name: 'leitstand_post_receive', input: {
+        projectId: thread.projectId, threadId: thread.threadId, providerSessionId: sessionId, postId: event.id } } }
     }
     return item
   })
@@ -90,7 +89,7 @@ export function wakeMessage(thread: Thread, events: Event[], posts: Record<strin
 
 export function guidanceMessage(text: string, route: Record<string, string>): string {
   if (bytes('Leitstand Context:\n' + text) <= MAX_MESSAGE) return 'Leitstand Context:\n' + text
-  const footer = '\nDie Guidance bleibt pending. Optionaler Model-Read: leitstand_guidance ' + JSON.stringify(route) + '.'
+  const footer = '\nDie Guidance bleibt pending. Optionaler Model-Read: tools_call leitstand_guidance ' + JSON.stringify(route) + '.'
   let body = text
   while (bytes('Leitstand Context:\n' + body + ' [gekürzt]' + footer) > MAX_MESSAGE) body = body.slice(0, Math.floor(body.length * 0.9))
   return 'Leitstand Context:\n' + body + ' [gekürzt]' + footer
@@ -118,7 +117,7 @@ const S = {
 
 const storeKey = () => 'session:' + S.facts!.providerSessionId
 const message = (error: unknown) => String((error as Error)?.message ?? error).slice(0, 200)
-// The engine's refusal of a `$.mcp.call` by the person's permission rules: "...$.mcp.call(<server>, <tool>) refused: <reason>".
+// The engine's refusal of a `$.mcp.call` by the person's permission rules: "...$.mcp.call(<server>, <tool>) refused: <reason>" (the tool is always `tools_call`).
 const refused = (error: unknown) => /\$\.mcp\.call\([^)]*\) refused: /.test(message(error))
 
 function note($: EngineInterface, text: string) {
@@ -126,7 +125,7 @@ function note($: EngineInterface, text: string) {
 }
 
 async function call($: EngineInterface, tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await $.mcp.call(S.server, tool, args)
+  const result = await $.mcp.call(S.server, 'tools_call', { name: tool, input: args })
   const text = result.content[0]?.text
   if (result.isError) throw new ToolError(`${tool} meldet Fehler: ${(text ?? '').slice(0, 200)}`)
   let value: unknown
@@ -375,6 +374,14 @@ async function boundaryGuidance($: EngineInterface, toolName: string) {
   } finally { S.guidanceInFlight = false }
 }
 
+// The model reaches every Leitstand tool through the Front Door `tools_call` { name, input: { ... } }; an older client names the tool directly.
+function logicalCall(e: { tool: unknown; input?: unknown; projectId?: unknown }): { tool: string; projectId: unknown } {
+  const tool = String(e.tool)
+  if (!tool.endsWith('__tools_call')) return { tool, projectId: e.projectId }
+  const input = (e.input ?? {}) as { name?: unknown; input?: { projectId?: unknown } }
+  return { tool: String(input.name ?? ''), projectId: input.input?.projectId }
+}
+
 async function boundary($: EngineInterface, tool: string, projectId: unknown) {
   if (S.stoppedReason && !S.stoppedShown) {
     S.stoppedShown = true
@@ -429,8 +436,8 @@ export const register: Register = on => {
   // Tool boundary: pending Guidance, a missing attribution hint and a stopped Listener reach the model.
   on('tool.call', async ($, e, next) => {
     if (e.agentId !== undefined || !S.facts) return next(e)
-    const tool = String(e.tool)
-    await boundary($, tool, (e as { projectId?: unknown }).projectId)
+    const { tool, projectId } = logicalCall(e as { tool: unknown; input?: unknown; projectId?: unknown })
+    await boundary($, tool, projectId)
     const result = await next(e)
     // A fresh registration is visible at once instead of after the next refresh.
     if (/(?:^|__)leitstand_(thread|start|take_over|resume)$/.test(tool)) S.refreshedAt = -Infinity

@@ -13,7 +13,7 @@ execution is safe. This explicit/manual loader belongs to the Leitstand plugin.
 
 Use `leitstand:start` to resolve the actual project, ownership and exact workflow
 pin. Load `close` through `leitstand_workflow` at that version, plus the sections
-and current tool schemas it requires. Follow that central close contract for
+and current tool schemas it requires. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`). Follow that central close contract for
 Auftrag/O-Ton reconciliation, criterion Evidence, open ends, execution cleanup,
 actual lifecycle and readback; this Skill adds no second close policy.
 
