@@ -1,0 +1,9 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"$PLUGIN_ROOT/hooks/listener.py\" SessionStart", "timeout": 30}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 \"$PLUGIN_ROOT/hooks/listener.py\" UserPromptSubmit", "timeout": 30}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "python3 \"$PLUGIN_ROOT/hooks/listener.py\" Stop", "timeout": 30}]}],
+    "PreToolUse": [{"hooks": [{"type": "command", "command": "python3 \"$PLUGIN_ROOT/hooks/listener.py\" PreToolUse", "timeout": 30, "additionalContextLimit": 8000}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 \"$PLUGIN_ROOT/hooks/listener.py\" SessionEnd", "timeout": 3}]}]
+  }
+}

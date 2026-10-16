@@ -1,0 +1,11 @@
+{
+  "name": "leitstand",
+  "version": "0.5.1",
+  "author": {
+    "name": "s16e"
+  },
+  "description": "Zentraler Leitstand mit Memories, Fragerunden und Übergaben.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/codex.json"
+}
