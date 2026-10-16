@@ -12,7 +12,10 @@ const IDLE_MS = 30 * 60_000
 const MAX_MESSAGE = 8 * 1024
 const KEEP_STATE_MS = 2 * 24 * 3600_000
 // `$.mcp.call` passes the person's permission rules like a tool call; these need an allow rule.
-const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand__leitstand_session, _guidance, _watch, _post_receive und _repository_fix_ack.'
+const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand__leitstand_session, ' +
+  'mcp__plugin_leitstand_leitstand__leitstand_guidance, mcp__plugin_leitstand_leitstand__leitstand_watch, ' +
+  'mcp__plugin_leitstand_leitstand__leitstand_post_receive und mcp__plugin_leitstand_leitstand__leitstand_repository_fix_ack. ' +
+  '/leitstand:start trägt sie nach Bestätigung in die Settings ein.'
 
 type Thread = { projectId: string; threadId: string; role?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
@@ -96,12 +99,15 @@ const S = {
   generation: 0,
   stoppedReason: undefined as string | undefined,
   stoppedShown: false,
+  permissionShown: false,
   guidanceInFlight: false,
   hinted: new Set<string>(),
 }
 
 const storeKey = () => 'session:' + S.facts!.providerSessionId
 const message = (error: unknown) => String((error as Error)?.message ?? error).slice(0, 200)
+// The engine's refusal of a `$.mcp.call` by the person's permission rules: "...$.mcp.call(<server>, <tool>) refused: <reason>".
+const refused = (error: unknown) => /\$\.mcp\.call\([^)]*\) refused: /.test(message(error))
 
 function note($: EngineInterface, text: string) {
   $.ui.log('Leitstand-Listener: ' + text, { to: 'debug' })
@@ -168,7 +174,8 @@ function stop($: EngineInterface, reason?: string) {
   S.generation++
   if (reason) {
     S.stoppedReason = reason
-    S.stoppedShown = false
+    // The Permission hint reaches the model once per session, however often a prompt re-arms and is refused again.
+    S.stoppedShown = reason === PERMISSION && S.permissionShown
     note($, reason)
     $.ui.status('Leitstand-Listener gestoppt')
   }
@@ -270,7 +277,7 @@ async function tick($: EngineInterface, mine: number) {
     schedule($, delay)
   } catch (error) {
     if (error instanceof ToolError) return stop($, error.message)
-    if (/refused/.test(message(error))) return stop($, PERMISSION)
+    if (refused(error)) return stop($, PERMISSION)
     // Transient (network, server restart): back off and keep listening.
     S.failures++
     note($, `transient failure ${S.failures}: ${message(error)}`)
@@ -284,7 +291,7 @@ async function arm($: EngineInterface, fresh: boolean) {
   S.lastActivity = await $.clock.now()
   if (fresh) {
     try { S.threads = await session($, 'start') }
-    catch (error) { return stop($, /refused/.test(message(error)) ? PERMISSION : `leitstand_session start fehlgeschlagen: ${message(error)}`) }
+    catch (error) { return stop($, refused(error) ? PERMISSION : `leitstand_session start fehlgeschlagen: ${message(error)}`) }
     S.refreshedAt = -Infinity
   }
   S.stoppedReason = undefined
@@ -354,6 +361,7 @@ async function boundaryGuidance($: EngineInterface, toolName: string) {
 async function boundary($: EngineInterface, tool: string, projectId: unknown) {
   if (S.stoppedReason && !S.stoppedShown) {
     S.stoppedShown = true
+    if (S.stoppedReason === PERMISSION) S.permissionShown = true
     await append($, `LEITSTAND GUIDANCE: Der Leitstand-Listener dieser Session ist gestoppt (${S.stoppedReason}). Posts wecken die Session nicht, bis er wieder läuft.`)
   }
   if (/(?:^|__)leitstand_[a-z_]+$/.test(tool) && typeof projectId === 'string' && projectId.length <= 200 && S.running
@@ -368,6 +376,7 @@ async function boundary($: EngineInterface, tool: string, projectId: unknown) {
 async function end($: EngineInterface, sessionId: string, reason: string) {
   if (!S.facts || S.facts.providerSessionId !== sessionId) return
   stop($)
+  S.permissionShown = false
   try { await session($, 'end') } catch (error) { note($, 'leitstand_session end: ' + message(error)) }
   try { await $.store.delete(storeKey()) } catch { /* pruned at a later start */ }
   S.facts = undefined

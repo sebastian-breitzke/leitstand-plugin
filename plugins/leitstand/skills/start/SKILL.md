@@ -5,6 +5,24 @@ description: Resolve central Leitstand work and load its versioned workflow for 
 
 # Leitstand
 
+## Permissions
+
+The plugin's Listener wakes this session on new Posts and calls five Leitstand tools through your permission rules.
+Before the workflow, check that `permissions.allow` (user, project or local settings) contains each of them:
+
+```
+mcp__plugin_leitstand_leitstand__leitstand_session
+mcp__plugin_leitstand_leitstand__leitstand_guidance
+mcp__plugin_leitstand_leitstand__leitstand_watch
+mcp__plugin_leitstand_leitstand__leitstand_post_receive
+mcp__plugin_leitstand_leitstand__leitstand_repository_fix_ack
+```
+
+If any is missing, say so plainly and offer to add the missing ones to `permissions.allow` in the user settings
+`~/.claude/settings.json` (recommended). Write them only after the user explicitly confirms, through the
+`update-config` skill; never edit the settings silently. If the user declines, continue without and do not ask again
+in this session.
+
 Load the connected service's current entry instructions before selecting or
 creating a project: discover `leitstand_workflow` and call it with
 `section: "bootstrap"`, omitting `version`. Follow that section to resolve the
