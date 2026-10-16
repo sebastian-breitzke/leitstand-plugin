@@ -4,5 +4,6 @@
   "author": {
     "name": "s16e"
   },
-  "description": "Zentraler Leitstand mit Memories, Fragerunden und Übergaben."
+  "description": "Zentraler Leitstand mit Memories, Fragerunden und Übergaben.",
+  "icon": "./logo.png"
 }
