@@ -11,6 +11,14 @@ const REFRESH_MS = 60_000
 const IDLE_MS = 30 * 60_000
 const MAX_MESSAGE = 8 * 1024
 const KEEP_STATE_MS = 2 * 24 * 3600_000
+// A session's first Watch snapshot lists open state, not news: informational deployment notices older than this are
+// only acknowledged (cursor advance), they do not wake. One hour is far beyond clock skew and delivery lag between
+// server and client, yet a session that starts minutes after a release still hears about it.
+const STALE_MS = 3600_000
+// Informational kinds the stale rule may skip. Posts, Fix notices, announcements, holds and overview requests are
+// directed or still open and always wake; an unknown kind also wakes.
+const INFORMATIONAL = new Set(['target_created', 'repositories_added', 'request_queued', 'hold_created', 'hold_released',
+  'release_claimed', 'release_started', 'release_finished', 'request_cancelled'])
 // `$.mcp.call` passes the person's permission rules like a tool call; these need an allow rule.
 const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand__leitstand_session, ' +
   'mcp__plugin_leitstand_leitstand__leitstand_guidance, mcp__plugin_leitstand_leitstand__leitstand_watch, ' +
@@ -102,6 +110,8 @@ const S = {
   permissionShown: false,
   guidanceInFlight: false,
   hinted: new Set<string>(),
+  // Threads whose first Watch snapshot is still being read (hasMore); later events are never filtered.
+  snapshot: new Set<string>(),
 }
 
 const storeKey = () => 'session:' + S.facts!.providerSessionId
@@ -191,6 +201,7 @@ async function wake($: EngineInterface, text: string) {
   await $.prompt.submit({ text })
 }
 
+const stale = (e: Event, now: number) => INFORMATIONAL.has(e.kind) && now - Date.parse(String(e.at)) > STALE_MS
 const once = (e: Event) => e.kind === 'post_received' || e.kind.startsWith('repository_fix_')
 const pendingGuidance = (value: Record<string, unknown>, shown: string[]) =>
   (Array.isArray(value.guidance) ? value.guidance : [])
@@ -245,8 +256,12 @@ async function tick($: EngineInterface, mine: number) {
       S.failures = 0
       // Unacknowledged Posts replay behind the cursor; wake only once per Post or notice.
       const delivered = (await load($)).delivered
+      const initial = !cursor || S.snapshot.has(slot)
+      if (initial && value.hasMore === true) S.snapshot.add(slot)
+      else S.snapshot.delete(slot)
+      // Only the session's first snapshot is filtered; the cursor below still advances past the old events (Ack, no deletion).
       const events = (value.events as Event[]).filter(e => e && typeof e.id === 'string' && typeof e.kind === 'string'
-        && !(once(e) && delivered.includes(e.id)))
+        && !(once(e) && delivered.includes(e.id)) && !(initial && stale(e, asked)))
       if (!events.length) {
         await update($, state => { state.cursors[slot] = after })
         // Only replayed Posts: the server answered at once; wait out the rest of the poll.
