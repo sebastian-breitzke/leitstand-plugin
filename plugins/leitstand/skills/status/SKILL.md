@@ -9,7 +9,7 @@ description: Give an evidence-backed Leitstand Status from central sources when 
 # Leitstand Status
 
 Return the current fachlicher Status without reconstructing the prior chat.
-This explicit/manual loader belongs to the Leitstand plugin.
+This explicit/manual loader belongs to the Leitstand plugin, not global discovery.
 
 Use `leitstand:start` to resolve the selected project and exact workflow pin.
 Load `inspection` through `leitstand_workflow` with that version and apply its
