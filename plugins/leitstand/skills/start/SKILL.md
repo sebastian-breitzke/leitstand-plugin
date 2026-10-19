@@ -19,6 +19,16 @@ If it is missing, say so plainly and offer to add it to `permissions.allow` in t
 `update-config` skill; never edit the settings silently. If the user declines, continue without and do not ask again
 in this session.
 
+## Auto-update
+
+Claude Code does not auto-update third-party marketplaces by default, so plugin fixes only arrive after a manual
+update. Once per user, tell them to enable it for the `leitstand` marketplace: run `/plugin`, open the tab
+Marketplaces, select `leitstand` and choose "Enable auto-update". Claude Code then refreshes the marketplace and the
+installed plugins in the background (up to about 10 minutes after the first message of a session); this session keeps
+the old version until `/reload-plugins` or the next session. Ask later whether it worked, and do not repeat the hint
+once the user confirms or declines. The manual path stays valid: `claude plugin marketplace update leitstand`, then
+`claude plugin update leitstand@leitstand`.
+
 The Leitstand MCP has a Front Door: `tools_search` (find groups and tools), `tools_describe` (schema), `tools_call` (run). Tool names in this text are the names for `tools_call`.
 
 Load the connected service's current entry instructions before selecting or

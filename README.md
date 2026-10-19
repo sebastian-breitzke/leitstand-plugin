@@ -8,6 +8,10 @@ claude plugin marketplace add sebastian-breitzke/leitstand-plugin
 claude plugin install leitstand@leitstand
 ```
 
+Schalte danach einmalig automatische Updates ein: `/plugin`, Reiter Marketplaces, `leitstand` wählen, „Enable auto-update“. Claude Code
+aktualisiert Drittanbieter-Marketplaces sonst nicht von selbst. Manuell: `claude plugin marketplace update leitstand`, dann
+`claude plugin update leitstand@leitstand`.
+
 Starte danach eine neue Session und öffne `/mcp`, um die Verbindung im Browser freizugeben. Dafür
 braucht es einen Account auf leitstand.s16e.de.
 
