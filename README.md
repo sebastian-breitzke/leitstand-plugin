@@ -20,6 +20,8 @@ Der Leitstand-MCP hat eine Front Door (`tools_search`, `tools_describe`, `tools_
 {"permissions": {"allow": ["mcp__plugin_leitstand_leitstand"]}}
 ```
 
+Hinweise ohne Blockade: Ist die Session einem Vorhaben zugeordnet, erinnert der Listener lokal und regelbasiert (kein Netzwerkaufruf, kein Modell) daran, HTML-Ergebnisse per `leitstand_artifact` in den Leitstand zu veröffentlichen, wenn die Session eine HTML-Datei schreibt oder das Artifact-Werkzeug des Clients nutzt. Zauberwörter in deiner Nachricht (Fragerunde, Checkpoint, Übergabe/Handover, Abschluss, Status, Artefakt/ins Material) verweisen einmal pro Session auf den passenden Workflow-Abschnitt, und viele Fragen im Chat auf eine Fragerunde. Codex kennt kein eigenes Artifact-Werkzeug; dort greift nur das Schreiben von HTML-Dateien.
+
 Befehle: `/leitstand:start`, `/leitstand:status`, `/leitstand:brainstorm`, `/leitstand:slice`,
 `/leitstand:orchestrate`, `/leitstand:checkpoint`, `/leitstand:handover`, `/leitstand:complete`.
 

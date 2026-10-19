@@ -347,7 +347,7 @@ def listen(native, store):
                 time.sleep(max(0, min(5, wait / 1000 - (time.monotonic() - started))))
 
 
-def guidance(native, store, payload):
+def guidance(native, store, payload, hint=""):
     state = store.read()
     chunks = []
     for thread in state.get("threads", []):
@@ -361,24 +361,128 @@ def guidance(native, store, payload):
     text = HEAD + "\n" + json.dumps(chunks) if chunks else ""
     if len(text.encode()) > 24000:
         raise ListenerError("Guidance überschreitet Hook-Budget; native tools_call leitstand_guidance direkt lesen.")
+    if chunks or hint:
+        print_context("PreToolUse", "\n\n".join(part for part in (text, hint) if part))
     if chunks:
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}))
         with store.update() as current:
             current["guidance"] = (current.get("guidance", []) + [c["coordinationData"]["id"] for c in chunks])[-200:]
 
 
+# Rule-based, non-blocking nudges (mirror of the Claude Code Listener, whose listener.ts owns the canonical wording):
+# local string checks only, no network, no LLM; they fire only while the session is registered to a Vorhaben.
+NUDGE = "Leitstand hint (nothing is blocked): "
+FRAGERUNDE = ('Open decisions belong in a Fragerunde in Leitstand, not in chat: tools_call leitstand_workflow with section "questions", '
+              "then leitstand_round and leitstand_question.")
+PUBLISH = ("Publish it into the Vorhaben with tools_call leitstand_artifact (small self-contained HTML you authored) or, for an existing "
+           "local file, tools_call leitstand_upload_open with the local upload helper, and share the Leitstand URL in your answer.")
+ARTIFACT_HINT = (NUDGE + "this session is assigned to a Leitstand Vorhaben; results for Sebastian or the team belong there, not only in the "
+                 "client or on local disk. " + PUBLISH + " A copy in the client's own artifact tool may stay.")
+QUESTION_HINT = (NUDGE + "your previous message asked the user several questions in chat. " + FRAGERUNDE +
+                 " Move every still-open decision there; plain clarifications may stay in chat.")
+# Magic words, same list as GLOSSARY in the Claude Code listener.ts: (key, terms, standalone, hint).
+GLOSSARY = (
+    ("fragerunde", ("fragerunde", "question round", "questions round", "round of questions", "clarification round"), False,
+     NUDGE + 'the user said "Fragerunde". ' + FRAGERUNDE),
+    ("checkpoint", ("checkpoint",), False,
+     NUDGE + 'the user said "Checkpoint": save a state checkpoint in Leitstand (/leitstand:checkpoint, or tools_call leitstand_workflow with section "state").'),
+    ("handover", ("übergabe", "uebergabe", "handover", "hand over", "hand-over"), False,
+     NUDGE + 'the user said "Übergabe" or "Handover": follow the handover section (tools_call leitstand_workflow with section "handover").'),
+    ("close", ("abschluss", "abschließen", "abschliessen", "close out", "closeout"), False,
+     NUDGE + 'the user said "Abschluss": follow the close section (tools_call leitstand_workflow with section "close").'),
+    ("status", ("status",), True,
+     NUDGE + 'the user asked for "Status": follow the inspection section (tools_call leitstand_workflow with section "inspection").'),
+    ("artifact", ("artefakt", "artifact", "ins material"), False,
+     NUDGE + 'the user said "Artefakt" or "ins Material". ' + PUBLISH),
+)
+STANDALONE_MAX = 40
+HTML_PATCH = re.compile(r"^\*\*\* (?:Add|Update) File: .*\.html?\s*$", re.I | re.M)
+
+
+def glossary_hints(text, seen):
+    """Hints for glossary words in text not yet in seen (a list); marks them seen: once per word and session."""
+    hints = []
+    for key, terms, standalone, hint in GLOSSARY:
+        if key in seen:
+            continue
+        for term in terms:
+            match = re.search(r"(?<!\w)" + re.escape(term).replace(r"\ ", r"\s+"), text, re.I)
+            if match and (not standalone or len(text.strip()) <= STANDALONE_MAX or match.start() == len(text) - len(text.lstrip())):
+                seen.append(key)
+                hints.append(hint)
+                break
+    return hints
+
+
+def count_questions(answer):
+    prose = re.sub(r"`[^`\n]*`", " ", re.sub(r"```.*?(```|$)", " ", answer or "", flags=re.S))
+    return len(re.findall(r"\?(?=\s|$|[\"'’”)\]*_])", prose))
+
+
+def artifact_call(payload):
+    """True when the tool call writes an HTML file; Codex has no client artifact tool to match."""
+    tool_input = payload.get("tool_input")
+    if isinstance(tool_input, dict):
+        path = tool_input.get("file_path") or tool_input.get("path")
+        if isinstance(path, str) and re.search(r"\.html?$", path, re.I):
+            return True
+        tool_input = tool_input.get("command")
+    return isinstance(tool_input, str) and bool(HTML_PATCH.search(tool_input))
+
+
+def assigned(state):
+    return bool(state.get("facts") and state.get("threads") and not state.get("ended"))
+
+
+def print_context(event, text):
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+
+
+def pre_tool_hint(state, payload, store):
+    if not assigned(state) or "artifact" in state.get("nudged", []) or not artifact_call(payload):
+        return ""
+    with store.update() as current:
+        current["nudged"] = current.get("nudged", []) + ["artifact"]
+    return ARTIFACT_HINT
+
+
+def prompt_hints(state, payload, store):
+    if not assigned(state):
+        return []
+    with store.update() as current:
+        seen = current.setdefault("nudged", [])
+        hints = glossary_hints(str(payload.get("prompt") or ""), seen)
+        if current.pop("manyQuestions", False):
+            hints.append(QUESTION_HINT)
+    return hints
+
+
+def remember_questions(state, payload, store):
+    if assigned(state) and count_questions(str(payload.get("last_assistant_message") or "")) >= 3:
+        with store.update() as current:
+            current["manyQuestions"] = True
+
+
 def hook(event, payload, store):
     state = store.read()
+    hint = ""
+    if event == "UserPromptSubmit":
+        hints = prompt_hints(state, payload, store)
+        if hints:
+            print_context(event, "\n\n".join(hints))
+    elif event == "Stop":
+        remember_questions(state, payload, store)
     if event == "PreToolUse":
         if not state.get("facts"):
             return
+        hint = pre_tool_hint(state, payload, store)
         if state.get("error"):
             with store.update() as current:
                 if current.get("errorShown") == state["error"]:
+                    if hint:
+                        print_context(event, hint)
                     return
                 current["errorShown"] = state["error"]
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                  "additionalContext": "Leitstand-Listener gestoppt: " + state["error"]}}))
+            print_context(event, "\n\n".join(("Leitstand-Listener gestoppt: " + state["error"], hint) if hint else ("Leitstand-Listener gestoppt: " + state["error"],)))
             return
         with store.update() as current:
             current["activity"] = time.time()
@@ -400,7 +504,7 @@ def hook(event, payload, store):
             raise ListenerError("Session ist nicht im default app-server loaded. Unterstützt: app-server --listen unix:// und codex --remote unix:// im selben CODEX_HOME.")
         state = store.read()
         if event == "PreToolUse":
-            guidance(native, store, payload)
+            guidance(native, store, payload, hint)
             return
         current_facts = facts(payload)
         action = "refresh" if state.get("facts") and not state.get("ended") else "start"

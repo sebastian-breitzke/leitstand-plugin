@@ -26,6 +26,70 @@ const INFORMATIONAL = new Set(['target_created', 'repositories_added', 'request_
 const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitstand_leitstand. ' +
   '/leitstand:start trägt die Regel nach Bestätigung in die Settings ein.'
 
+// Rule-based, non-blocking nudges against drift in a Leitstand-assigned session: local string checks only, no network, no LLM.
+// Each hint reaches the model as hidden context and blocks nothing. They fire only while the session is registered to a Vorhaben.
+const NUDGE = 'Leitstand hint (nothing is blocked): '
+const FRAGERUNDE = 'Open decisions belong in a Fragerunde in Leitstand, not in chat: tools_call leitstand_workflow with section "questions", ' +
+  'then leitstand_round and leitstand_question.'
+const PUBLISH = 'Publish it into the Vorhaben with tools_call leitstand_artifact (small self-contained HTML you authored) or, for an existing ' +
+  'local file, tools_call leitstand_upload_open with the local upload helper, and share the Leitstand URL in your answer.'
+export const ARTIFACT_HINT = NUDGE + 'this session is assigned to a Leitstand Vorhaben; results for Sebastian or the team belong there, not only in the ' +
+  'client or on local disk. ' + PUBLISH + ' A copy in the client\'s own artifact tool may stay.'
+export const QUESTION_HINT = NUDGE + 'your previous message asked the user several questions in chat. ' + FRAGERUNDE +
+  ' Move every still-open decision there; plain clarifications may stay in chat.'
+
+// Magic words the user can say, mirrored by the website page. `terms` match case-insensitively at the start of a word
+// (so "Fragerunden" and "Artefakte" count); `standalone` limits a term to a short message or one that starts with it.
+export const GLOSSARY: readonly { key: string; terms: readonly string[]; standalone?: boolean; hint: string }[] = [
+  { key: 'fragerunde', terms: ['fragerunde', 'question round', 'questions round', 'round of questions', 'clarification round'],
+    hint: NUDGE + 'the user said "Fragerunde". ' + FRAGERUNDE },
+  { key: 'checkpoint', terms: ['checkpoint'],
+    hint: NUDGE + 'the user said "Checkpoint": save a state checkpoint in Leitstand (/leitstand:checkpoint, or tools_call leitstand_workflow with section "state").' },
+  { key: 'handover', terms: ['übergabe', 'uebergabe', 'handover', 'hand over', 'hand-over'],
+    hint: NUDGE + 'the user said "Übergabe" or "Handover": follow the handover section (tools_call leitstand_workflow with section "handover").' },
+  { key: 'close', terms: ['abschluss', 'abschließen', 'abschliessen', 'close out', 'closeout'],
+    hint: NUDGE + 'the user said "Abschluss": follow the close section (tools_call leitstand_workflow with section "close").' },
+  { key: 'status', terms: ['status'], standalone: true,
+    hint: NUDGE + 'the user asked for "Status": follow the inspection section (tools_call leitstand_workflow with section "inspection").' },
+  { key: 'artifact', terms: ['artefakt', 'artifact', 'ins material'],
+    hint: NUDGE + 'the user said "Artefakt" or "ins Material". ' + PUBLISH },
+]
+const STANDALONE_MAX = 40
+
+const wordStart = (term: string) => new RegExp('(?<![\\p{L}\\p{N}])' + term.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&').replace(/ /g, '\\s+'), 'iu')
+
+// Hints for the glossary words in `text` that `seen` does not hold yet; marks them seen (once per word and session).
+export function glossaryHints(text: string, seen: Set<string>): string[] {
+  const hints: string[] = []
+  for (const entry of GLOSSARY) {
+    if (seen.has(entry.key)) continue
+    const hit = entry.terms.some(term => {
+      const match = wordStart(term).exec(text)
+      return !!match && (!entry.standalone || text.trim().length <= STANDALONE_MAX || match.index === text.length - text.trimStart().length)
+    })
+    if (!hit) continue
+    seen.add(entry.key)
+    hints.push(entry.hint)
+  }
+  return hints
+}
+
+// Question sentences in an assistant message, code blocks and inline code excluded.
+export function countQuestions(answer: string): number {
+  const prose = answer.replace(/```[\s\S]*?(```|$)/g, ' ').replace(/`[^`\n]*`/g, ' ')
+  return (prose.match(/\?(?=\s|$|["'’”)\]*_])/g) ?? []).length
+}
+
+// Does this tool call put a deliverable into the client's own artifact tool or onto disk as HTML?
+export function artifactCall(e: { tool: unknown } & Record<string, unknown>): boolean {
+  if (e.tool === 'Artifact') return e.action === undefined || e.action === 'publish'
+  if (e.tool !== 'Write' && e.tool !== 'Edit' && e.tool !== 'NotebookEdit') return false
+  const path = e.file_path ?? e.notebook_path
+  return typeof path === 'string' && /\.html?$/i.test(path)
+}
+
+const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'unclassified'])
+
 type Thread = { projectId: string; threadId: string; role?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
 type Saved = { cursors: Record<string, string>; delivered: string[]; guidance: string[]; toAck: Ack[]; updatedAt: number }
@@ -111,6 +175,9 @@ const S = {
   permissionShown: false,
   guidanceInFlight: false,
   hinted: new Set<string>(),
+  // Nudges already shown this session (glossary keys and 'artifact'); a many-questions answer waits for the next prompt.
+  nudged: new Set<string>(),
+  manyQuestions: false,
   // Threads whose first Watch snapshot is still being read (hasMore); later events are never filtered.
   snapshot: new Set<string>(),
 }
@@ -401,6 +468,8 @@ async function end($: EngineInterface, sessionId: string, reason: string) {
   if (!S.facts || S.facts.providerSessionId !== sessionId) return
   stop($)
   S.permissionShown = false
+  S.nudged.clear()
+  S.manyQuestions = false
   try { await session($, 'end') } catch (error) { note($, 'leitstand_session end: ' + message(error)) }
   try { await $.store.delete(storeKey()) } catch { /* pruned at a later start */ }
   S.facts = undefined
@@ -428,6 +497,7 @@ export const register: Register = on => {
     if (e.agentId !== undefined || !S.facts) return done
     S.busy = false
     S.lastActivity = await $.clock.now()
+    if (e.reason === 'answer' && S.threads.length && countQuestions(e.answer) >= 3) S.manyQuestions = true
     // A finished turn has processed the Posts and fix notices it was woken with.
     if (e.reason === 'answer') await acknowledge($)
     return done
@@ -439,9 +509,20 @@ export const register: Register = on => {
     const { tool, projectId } = logicalCall(e as { tool: unknown; input?: unknown; projectId?: unknown })
     await boundary($, tool, projectId)
     const result = await next(e)
+    const hint = S.threads.length && !S.nudged.has('artifact') && artifactCall(e as never) ? ARTIFACT_HINT : undefined
+    if (hint) S.nudged.add('artifact')
     // A fresh registration is visible at once instead of after the next refresh.
     if (/(?:^|__)leitstand_(thread|start|take_over|resume)$/.test(tool)) S.refreshedAt = -Infinity
-    return result
+    return hint && !result.deny ? { ...result, context: [...(result.context ?? []), hint] } : result
+  })
+
+  // Magic words and a many-questions answer reach the model as hidden context of the user's next prompt.
+  on('prompt.submit', async ($, e, next) => {
+    if (!S.facts || !S.threads.length || e.isMeta || e.command || !HUMAN_ORIGINS.has(e.origin?.kind ?? 'unclassified')) return next(e)
+    const hints = glossaryHints(e.text, S.nudged)
+    if (S.manyQuestions) hints.push(QUESTION_HINT)
+    S.manyQuestions = false
+    return next(hints.length ? { ...e, context: [...(e.context ?? []), ...hints] } : e)
   })
 
   // The settings-hook stage of the end still has the MCP connection in a headless run; session.end may not.
