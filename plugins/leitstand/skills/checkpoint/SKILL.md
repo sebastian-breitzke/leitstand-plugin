@@ -69,8 +69,8 @@ Return in this order:
    is resolved; preserve the blocker rather than describing it as solved.
 
 For Claude Code, emit exactly one block holding only the fully populated
-instructions, without a leading `/compact `. Sebastian pastes the block into the
-compact instructions field or after `/compact` that he types himself; a pasted
+instructions, without a leading `/compact `. The user pastes the block into the
+compact instructions field or after `/compact` that they type themselves; a pasted
 `/compact ` prefix is taken as plain text and must be deleted by hand. Its
 documented syntax is `/compact [instructions]`
 ([official commands](https://code.claude.com/docs/en/commands), checked 2026-10-14).

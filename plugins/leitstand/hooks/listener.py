@@ -375,7 +375,7 @@ FRAGERUNDE = ('Open decisions belong in a Fragerunde in Leitstand, not in chat: 
               "then leitstand_round and leitstand_question.")
 PUBLISH = ("Publish it into the Vorhaben with tools_call leitstand_artifact (small self-contained HTML you authored) or, for an existing "
            "local file, tools_call leitstand_upload_open with the local upload helper, and share the Leitstand URL in your answer.")
-ARTIFACT_HINT = (NUDGE + "this session is assigned to a Leitstand Vorhaben; results for Sebastian or the team belong there, not only in the "
+ARTIFACT_HINT = (NUDGE + "this session is assigned to a Leitstand Vorhaben; results for the user or the team belong there, not only in the "
                  "client or on local disk. " + PUBLISH + " A copy in the client's own artifact tool may stay.")
 QUESTION_HINT = (NUDGE + "your previous message asked the user several questions in chat. " + FRAGERUNDE +
                  " Move every still-open decision there; plain clarifications may stay in chat.")

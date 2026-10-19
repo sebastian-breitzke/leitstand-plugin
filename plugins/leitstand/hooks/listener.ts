@@ -33,7 +33,7 @@ const FRAGERUNDE = 'Open decisions belong in a Fragerunde in Leitstand, not in c
   'then leitstand_round and leitstand_question.'
 const PUBLISH = 'Publish it into the Vorhaben with tools_call leitstand_artifact (small self-contained HTML you authored) or, for an existing ' +
   'local file, tools_call leitstand_upload_open with the local upload helper, and share the Leitstand URL in your answer.'
-export const ARTIFACT_HINT = NUDGE + 'this session is assigned to a Leitstand Vorhaben; results for Sebastian or the team belong there, not only in the ' +
+export const ARTIFACT_HINT = NUDGE + 'this session is assigned to a Leitstand Vorhaben; results for the user or the team belong there, not only in the ' +
   'client or on local disk. ' + PUBLISH + ' A copy in the client\'s own artifact tool may stay.'
 export const QUESTION_HINT = NUDGE + 'your previous message asked the user several questions in chat. ' + FRAGERUNDE +
   ' Move every still-open decision there; plain clarifications may stay in chat.'
@@ -123,7 +123,7 @@ export function wakeMessage(thread: Thread, events: Event[], posts: Record<strin
   if (events.some(e => e.kind === 'post_received')) head += ' Leitstand bestätigt die Post automatisch, sobald dieser Turn endet.'
   if (events.some(e => e.kind.startsWith('repository_fix_')))
     head += ' Fix notices are acknowledged after this turn. On repository_fix_completed resume the blocked work; ' +
-      'on repository_fix_overdue inspect the fix, inform Sebastian before takeover (no new approval), and atomically take over with its current claimToken if still overdue; ' +
+      'on repository_fix_overdue inspect the fix, inform the user before takeover (no new approval), and atomically take over with its current claimToken if still overdue; ' +
       'on repository_fix_taken_over stop work under the former claim. A notice itself grants no ownership.'
   const body = events.map(event => {
     const item: Record<string, unknown> = { ...event }
