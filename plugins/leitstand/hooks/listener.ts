@@ -438,8 +438,10 @@ async function boundary($: EngineInterface, tool: string, projectId: unknown) {
     if (S.stoppedReason === PERMISSION) S.permissionShown = true
     await append($, `LEITSTAND GUIDANCE: Der Leitstand-Listener dieser Session ist gestoppt (${S.stoppedReason}). Posts wecken die Session nicht, bis er wieder läuft.`)
   }
+  // Only a session without any registered thread is asked to register: a session already registered to a Vorhaben
+  // that touches another one (read, cross-project Post) must not open a second thread there.
   if (/(?:^|__)leitstand_[a-z_]+$/.test(tool) && typeof projectId === 'string' && projectId.length <= 200 && S.running
-    && !S.threads.some(t => t.projectId === projectId) && !S.hinted.has(projectId)) {
+    && !S.threads.length && !S.hinted.has(projectId)) {
     S.hinted.add(projectId)
     await append($, `LEITSTAND GUIDANCE: Diese Session ist dem Vorhaben ${projectId} noch nicht zugeordnet. ` +
       `Registriere den tatsächlichen Faden mit providerSessionId ${S.facts!.providerSessionId}; Installation oder Workspace beweisen keine Session-Ownership.`)
