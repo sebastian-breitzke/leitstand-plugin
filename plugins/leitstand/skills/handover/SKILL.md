@@ -1,16 +1,21 @@
 ---
-disable-model-invocation: true
 name: handover
-metadata:
-  invocation: manual
-description: Load the pinned Leitstand Handover for continuation in another session or client, reusing Checkpoint where supported. Use for an explicit Handover; not same-session compaction, ordinary Status or parallel delegation.
+description: Load the pinned Leitstand Handover for continuation in another session or client, reusing Checkpoint where supported. Use when the user explicitly asks for a Handover or the Leitstand Cache-Guard requests one; not same-session compaction, ordinary Status or parallel delegation.
 ---
 
 # Leitstand Handover
 
-This manual loader routes an explicit Handover to the central workflow.
+This loader routes a Handover to the central workflow.
 The pinned `handover` section owns preservation, observed stop, source access,
 registration/transfer, failure handling, resume and continuation requirements.
+
+Hand over only when the Leitstand Cache-Guard ping asked for it or the user
+explicitly asks for a Handover; never on your own initiative. A Handover needs an
+observed stop of every worker this session started (subagents, background jobs).
+While one still runs or its stop is not observed, do not hand over: under the
+Cache-Guard, keep the session open and give the reason in one sentence. Open
+decisions stay open: do not decide or close them, and list each one in the
+continuation prompt.
 
 1. Use `leitstand:start` to resolve the actual project, ownership and exact workflow
    pin. Load current `core`/`migration` Guidance first. Handover secures existing work; execution resume requires safe migration. Load its manifest and `handover` section, then only the sections and tool

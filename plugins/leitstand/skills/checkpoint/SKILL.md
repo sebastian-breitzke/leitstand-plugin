@@ -1,9 +1,6 @@
 ---
-disable-model-invocation: true
 name: checkpoint
-metadata:
-  invocation: manual
-description: Save and verify a Leitstand checkpoint before compaction, reconcile Auftrag and decisions, and recommend compact with a complete tailored argument. Use when a Leitstand checkpoint or compact preparation is requested or a coherent context boundary is reached. Not for ordinary status updates or automatic compaction.
+description: Save and verify a Leitstand checkpoint before compaction, reconcile Auftrag and decisions, and recommend compact with a complete tailored argument. Use when the user requests a Leitstand checkpoint or compact preparation, or inside a permitted `leitstand:handover`. Not for ordinary status updates or automatic compaction.
 ---
 
 # Leitstand Checkpoint
@@ -11,6 +8,8 @@ description: Save and verify a Leitstand checkpoint before compaction, reconcile
 Secure the current Auftrag in existing Leitstand surfaces and return a usable
 compact argument. Same-session compaction is a checkpoint, not a mandatory
 Handover. This Skill does not execute compact or change monitors.
+Checkpoint only when the user asks for it or a permitted `leitstand:handover`
+uses it; never on your own initiative.
 
 ## Ground the checkpoint
 

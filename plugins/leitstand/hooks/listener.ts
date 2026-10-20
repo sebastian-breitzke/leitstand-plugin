@@ -504,7 +504,7 @@ export const register: Register = on => {
     if (hint) S.nudged.add('artifact')
     // A fresh registration is visible at once instead of after the next refresh.
     if (/(?:^|__)leitstand_(thread|start|take_over|resume)$/.test(tool)) S.refreshedAt = -Infinity
-    return hint && !result.deny ? { ...result, context: [...(result.context ?? []), hint] } : result
+    return hint && result.deny === undefined ? { ...result, context: [...(result.context ?? []), hint] } : result
   })
 
   // Magic words and a many-questions answer reach the model as hidden context of the user's next prompt.
