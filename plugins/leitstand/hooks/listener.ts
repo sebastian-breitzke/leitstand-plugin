@@ -1,4 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
+import { guardPromptSubmit, guardSessionEnd, guardSessionStart, guardToolCall, guardTurnComplete, guardTurnStart, isQuiet } from './cache-guard'
 
 // Leitstand Listener as a Claude Code mod: presence, Watch, wake, Guidance and Acks
 // through the plugin's own authenticated MCP connection. No secret, no identity here.
@@ -282,7 +283,8 @@ async function tick($: EngineInterface, mine: number) {
       }
       S.refreshedAt = await $.clock.now()
     }
-    if (!S.threads.length) return schedule($, 30_000)
+    // A handed-over session takes no wakes; Posts and Guidance stay pending on the server until the user wakes it.
+    if (!S.threads.length || isQuiet()) return schedule($, 30_000)
     const wait = Math.max(5000, Math.floor(25_000 / S.threads.length))
     let delay = 0
     for (const thread of S.threads) {
@@ -464,12 +466,14 @@ async function end($: EngineInterface, sessionId: string, reason: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    guardSessionStart()
     const started = await next(e)
     void begin($).catch(error => note($, 'Start fehlgeschlagen: ' + message(error)))
     return started
   })
 
   on('turn.start', async ($, e, next) => {
+    guardTurnStart(e)
     S.busy = true
     S.lastActivity = await $.clock.now()
     // A prompt after idle expiry or a stop re-arms the Listener (hook parity: prompt-submit).
@@ -478,6 +482,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    guardTurnComplete($, e)
     const done = await next(e)
     if (e.agentId !== undefined || !S.facts) return done
     S.busy = false
@@ -490,6 +495,7 @@ export const register: Register = on => {
 
   // Tool boundary: pending Guidance, a missing attribution hint and a stopped Listener reach the model.
   on('tool.call', async ($, e, next) => {
+    guardToolCall(e as { tool: unknown; agentId?: string })
     if (e.agentId !== undefined || !S.facts) return next(e)
     const { tool, projectId } = logicalCall(e as { tool: unknown; input?: unknown; projectId?: unknown })
     await boundary($, tool, projectId)
@@ -503,6 +509,8 @@ export const register: Register = on => {
 
   // Magic words and a many-questions answer reach the model as hidden context of the user's next prompt.
   on('prompt.submit', async ($, e, next) => {
+    const dropped = guardPromptSubmit(e)
+    if (dropped) return dropped
     if (!S.facts || !S.threads.length || e.isMeta || e.command || !HUMAN_ORIGINS.has(e.origin?.kind ?? 'unclassified')) return next(e)
     const hints = glossaryHints(e.text, S.nudged)
     if (S.manyQuestions) hints.push(QUESTION_HINT)
@@ -512,11 +520,13 @@ export const register: Register = on => {
 
   // The settings-hook stage of the end still has the MCP connection in a headless run; session.end may not.
   on('classic.SessionEnd', async ($, e, next) => {
+    guardSessionEnd(e)
     await end($, e.session_id, e.reason)
     return next(e)
   })
 
   on('session.end', async ($, e, next) => {
+    guardSessionEnd(e)
     await end($, e.sessionId, e.reason)
     return next(e)
   })
