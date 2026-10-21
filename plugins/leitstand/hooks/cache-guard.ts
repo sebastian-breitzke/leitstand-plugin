@@ -22,11 +22,11 @@ export const PING = `Leitstand Cache-Guard: Diese Session ist seit 45 Minuten in
 1. Übergeben (Normalfall): Führe den Skill \`leitstand:handover\` aus. Ist die Session noch keinem Vorhaben zugeordnet, lege vorher mit \`leitstand:start\` eines an. Schreibe keinen eigenen Übergabe-Prompt aus dem Chat: Der Skill legt Aufgaben, State und Memories im Leitstand ab und erzeugt den Übergabe-Prompt. Danach nimmt diese Session nur noch Eingaben des Users an.
 2. Offen lassen: nur wenn Subagenten oder Hintergrundarbeit noch laufen oder der Kontext wertvoller ist als ein Handover. Antworte dann in einem Satz mit dem Grund und tu sonst nichts. Der nächste Ping kommt in 45 Minuten.`
 
-// Does this tool call hand the session over? The Skill tool with `leitstand:handover`, or the Front Door `tools_call` { name, input }.
+// Does this tool call hand the session over? The Skill tool with `leitstand:handover`, or the Front Door `tools_call`, whose `name` argument the engine spreads onto the event.
 export function handoverCall(e: { tool: unknown } & Record<string, unknown>): boolean {
   if (e.tool === 'Skill') return e.skill === HANDOVER_SKILL
   if (!String(e.tool).endsWith('__tools_call')) return false
-  return (e.input as { name?: unknown } | undefined)?.name === HANDOVER_TOOL
+  return e.name === HANDOVER_TOOL
 }
 
 let timer: Timer | undefined

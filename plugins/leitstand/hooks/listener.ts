@@ -338,9 +338,11 @@ async function tick($: EngineInterface, mine: number) {
         state.delivered.push(...events.filter(once).map(e => e.id))
         state.toAck.push(...fresh)
       })
+      const queued = S.busy
       await wake($, wakeMessage(thread, events, posts, facts.providerSessionId))
-      // The woken turn has started: the next completed turn has processed these.
-      await update($, state => { for (const item of state.toAck) if (fresh.some(f => sameAck(f, item))) item.armed = true })
+      // Submitted to an idle session, the woken turn has started: the next completed turn has processed these.
+      // Behind a running turn it is only queued; the next main-loop turn.start arms them instead.
+      if (!queued) await update($, state => { for (const item of state.toAck) if (fresh.some(f => sameAck(f, item))) item.armed = true })
     }
     schedule($, delay)
   } catch (error) {
@@ -426,12 +428,12 @@ async function boundaryGuidance($: EngineInterface, toolName: string) {
   } finally { S.guidanceInFlight = false }
 }
 
-// The model reaches every Leitstand tool through the Front Door `tools_call` { name, input: { ... } }; an older client names the tool directly.
-function logicalCall(e: { tool: unknown; input?: unknown; projectId?: unknown }): { tool: string; projectId: unknown } {
+// The model reaches every Leitstand tool through the Front Door `tools_call`; the engine spreads its arguments { name, input: { ... } }
+// at the top level of the event. An older client names the tool directly.
+function logicalCall(e: { tool: unknown; name?: unknown; input?: { projectId?: unknown }; projectId?: unknown }): { tool: string; projectId: unknown } {
   const tool = String(e.tool)
   if (!tool.endsWith('__tools_call')) return { tool, projectId: e.projectId }
-  const input = (e.input ?? {}) as { name?: unknown; input?: { projectId?: unknown } }
-  return { tool: String(input.name ?? ''), projectId: input.input?.projectId }
+  return { tool: String(e.name ?? ''), projectId: e.input?.projectId }
 }
 
 async function boundary($: EngineInterface, tool: string, projectId: unknown) {
@@ -476,6 +478,8 @@ export const register: Register = on => {
     guardTurnStart(e)
     S.busy = true
     S.lastActivity = await $.clock.now()
+    // The turn that starts now is the woken turn of every Post queued behind its predecessor.
+    if (e.agentId === undefined && S.facts) await update($, state => { for (const item of state.toAck) item.armed = true })
     // A prompt after idle expiry or a stop re-arms the Listener (hook parity: prompt-submit).
     if (S.facts && !S.running) void arm($, S.stoppedReason !== undefined)
     return next(e)
@@ -497,7 +501,7 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     guardToolCall(e as { tool: unknown; agentId?: string })
     if (e.agentId !== undefined || !S.facts) return next(e)
-    const { tool, projectId } = logicalCall(e as { tool: unknown; input?: unknown; projectId?: unknown })
+    const { tool, projectId } = logicalCall(e as Parameters<typeof logicalCall>[0])
     await boundary($, tool, projectId)
     const result = await next(e)
     const hint = S.threads.length && !S.nudged.has('artifact') && artifactCall(e as never) ? ARTIFACT_HINT : undefined
