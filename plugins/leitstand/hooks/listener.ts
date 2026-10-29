@@ -81,7 +81,7 @@ export function artifactCall(e: { tool: unknown } & Record<string, unknown>): bo
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'unclassified'])
 
-type Thread = { projectId: string; threadId: string; role?: string }
+type Thread = { projectId: string; threadId: string; role?: string; title?: string; openQuestions?: number; url?: string; roundUrl?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
 type Saved = { cursors: Record<string, string>; delivered: string[]; guidance: string[]; toAck: Ack[]; updatedAt: number }
 type Facts = { provider: string; providerSessionId: string; host: string; workspace: string; model?: string; effort?: string }
@@ -244,8 +244,8 @@ function stop($: EngineInterface, reason?: string) {
     // The Permission hint reaches the model once per session, however often a prompt re-arms and is refused again.
     S.stoppedShown = reason === PERMISSION && S.permissionShown
     note($, reason)
-    $.ui.status('Leitstand-Listener gestoppt')
   }
+  $.ui.invalidate('ui.render')
 }
 
 function schedule($: EngineInterface, ms: number) {
@@ -282,6 +282,7 @@ async function tick($: EngineInterface, mine: number) {
         S.threads = await session($, 'start')
       }
       S.refreshedAt = await $.clock.now()
+      $.ui.invalidate('ui.render')
     }
     // A handed-over session takes no wakes; Posts and Guidance stay pending on the server until the user wakes it.
     if (!S.threads.length || isQuiet()) return schedule($, 30_000)
@@ -365,7 +366,7 @@ async function arm($: EngineInterface, fresh: boolean) {
     S.refreshedAt = -Infinity
   }
   S.stoppedReason = undefined
-  $.ui.status(undefined)
+  $.ui.invalidate('ui.render')
   schedule($, 0)
 }
 
@@ -387,6 +388,34 @@ async function begin($: EngineInterface) {
     if (name.startsWith('session:') && (value?.updatedAt ?? 0) < cutoff) await $.store.delete(name)
   }
   await arm($, true)
+}
+
+// A stopped Listener starts again from where it stopped: a failed MCP connection has no session facts yet.
+function restart($: EngineInterface) {
+  void (S.facts ? arm($, true) : begin($)).catch(error => note($, 'Neustart fehlgeschlagen: ' + message(error)))
+}
+
+const questions = (n: number) => `${n} ${n === 1 ? 'Frage' : 'Fragen'} offen`
+
+// The band above the prompt: each Vorhaben of this session with its open questions, or a stopped Listener and the way back.
+// It draws nothing for a session without a Vorhaben and a running Listener.
+function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]) {
+  const { Box, Text, Button, Link } = $.ui.resolve(e)
+  if (S.stoppedReason !== undefined) {
+    return Box({ flexDirection: 'row', gap: 1, children: [
+      Text({ color: 'warning', children: 'Leitstand gestoppt' }),
+      Text({ dimColor: true, wrap: 'truncate-end', children: S.stoppedReason }),
+      ...(S.stoppedReason === PERMISSION ? [] : [Button({ key: 'reconnect', label: 'Neu verbinden', onPress: () => restart($) })]),
+    ] })
+  }
+  const projects = S.threads.filter((t, i) => S.threads.findIndex(o => o.projectId === t.projectId) === i)
+  return Box({ flexDirection: 'column', children: projects.map(t => Box({ flexDirection: 'row', gap: 1, children: [
+    Text({ color: S.running ? 'success' : 'inactive', children: '●' }),
+    Text({ wrap: 'truncate-end', children: t.title || 'Vorhaben' }),
+    Text({ dimColor: true, children: t.openQuestions ? questions(t.openQuestions) : S.running ? 'hört zu' : 'ruht bis zur nächsten Nachricht' }),
+    ...(t.openQuestions && t.roundUrl ? [Link({ href: t.roundUrl, label: 'Fragerunde öffnen' })] : []),
+    ...(t.url ? [Link({ href: t.url, label: 'Vorhaben' })] : []),
+  ] })) })
 }
 
 async function acknowledge($: EngineInterface) {
@@ -462,6 +491,8 @@ async function end($: EngineInterface, sessionId: string, reason: string) {
   try { await session($, 'end') } catch (error) { note($, 'leitstand_session end: ' + message(error)) }
   try { await $.store.delete(storeKey()) } catch { /* pruned at a later start */ }
   S.facts = undefined
+  S.threads = []
+  $.ui.invalidate('ui.render')
   // A /clear continues under a new session id without session.start.
   if (reason === 'clear') $.clock.after(500, () => { void begin($) })
 }
@@ -480,8 +511,9 @@ export const register: Register = on => {
     S.lastActivity = await $.clock.now()
     // The turn that starts now is the woken turn of every Post queued behind its predecessor.
     if (e.agentId === undefined && S.facts) await update($, state => { for (const item of state.toAck) item.armed = true })
-    // A prompt after idle expiry or a stop re-arms the Listener (hook parity: prompt-submit).
+    // A prompt after idle expiry or a stop re-arms the Listener (hook parity: prompt-submit); a failed start begins again.
     if (S.facts && !S.running) void arm($, S.stoppedReason !== undefined)
+    else if (!S.facts && S.stoppedReason !== undefined) restart($)
     return next(e)
   })
 
@@ -496,6 +528,9 @@ export const register: Register = on => {
     if (e.reason === 'answer') await acknowledge($)
     return done
   })
+
+  on('ui.render', { component: 'AbovePrompt' }, ($, e, next) =>
+    e.props.hasSurvey || (S.stoppedReason === undefined && !S.threads.length) ? next(e) : band($, e))
 
   // Tool boundary: pending Guidance, a missing attribution hint and a stopped Listener reach the model.
   on('tool.call', async ($, e, next) => {
