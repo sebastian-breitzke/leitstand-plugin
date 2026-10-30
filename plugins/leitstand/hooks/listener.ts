@@ -398,7 +398,7 @@ function restart($: EngineInterface) {
 const questions = (n: number) => `${n} ${n === 1 ? 'Frage' : 'Fragen'} offen`
 
 // The band above the prompt: the Listener's state once, then the Vorhaben with open questions, most first, each count
-// linking its Fragerunde; the others fold into one line. One Vorhaben is one line. A stopped Listener shows why and the way back.
+// a red pill linking its Fragerunde; the others fold into one line. One Vorhaben is one line. A stopped Listener shows why and the way back.
 // It draws nothing for a session without a Vorhaben and a running Listener.
 function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], columns: number) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
@@ -412,7 +412,9 @@ function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']
   const dot = Text({ color: S.running ? 'success' : 'inactive', children: '●' })
   const state = S.running ? 'hört zu' : 'ruht bis zur nächsten Nachricht'
   const projects = S.threads.filter((t, i) => S.threads.findIndex(o => o.projectId === t.projectId) === i)
-  const count = (t: Thread) => Link({ href: t.roundUrl ?? t.url ?? '', label: questions(t.openQuestions ?? 0) })
+  // Open questions wait on the person: a red pill, unmissable in the band, that opens the Fragerunde.
+  const count = (t: Thread) => Link({ href: t.roundUrl ?? t.url ?? '',
+    children: Text({ backgroundColor: 'error', color: 'inverseText', weight: 'bold', children: ` ${questions(t.openQuestions ?? 0)} ` }) })
   if (projects.length === 1) {
     const t = projects[0]!
     return Box({ flexDirection: 'row', gap: 1, children: [dot, Text({ wrap: 'truncate-end', children: t.title || 'Vorhaben' }),
