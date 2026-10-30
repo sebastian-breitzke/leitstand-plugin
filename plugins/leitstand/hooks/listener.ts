@@ -416,7 +416,7 @@ function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']
   if (projects.length === 1) {
     const t = projects[0]!
     return Box({ flexDirection: 'row', gap: 1, children: [dot, Text({ wrap: 'truncate-end', children: t.title || 'Vorhaben' }),
-      ...(t.openQuestions ? [count(t)] : [Text({ dimColor: true, children: state }), ...(t.url ? [Link({ href: t.url, label: 'Vorhaben' })] : [])])] })
+      ...(t.openQuestions ? [count(t)] : [Text({ dimColor: true, children: state }), ...(t.url ? [Link({ href: t.url, label: 'öffnen' })] : [])])] })
   }
   const open = projects.filter(t => t.openQuestions).sort((a, b) => b.openQuestions! - a.openQuestions!)
   const total = open.reduce((sum, t) => sum + t.openQuestions!, 0)
