@@ -1,5 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { guardPromptSubmit, guardSessionEnd, guardSessionStart, guardToolCall, guardTurnComplete, guardTurnStart, isQuiet } from './cache-guard'
+import { PING, guardPromptSubmit, guardSessionEnd, guardSessionStart, guardToolCall, guardTurnComplete, guardTurnStart, isQuiet } from './cache-guard'
 
 // Leitstand Listener as a Claude Code mod: presence, Watch, wake, Guidance and Acks
 // through the plugin's own authenticated MCP connection. No secret, no identity here.
@@ -81,7 +81,67 @@ export function artifactCall(e: { tool: unknown } & Record<string, unknown>): bo
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'unclassified'])
 
-type Thread = { projectId: string; threadId: string; role?: string; title?: string; openQuestions?: number; url?: string; roundUrl?: string }
+// Event stream: every tool call of the session and its subagents, and everything this plugin puts into the model's context.
+// Metadata only: the logical tool, its activity, repository-relative paths, origin and reason. Commands, contents, diffs, user
+// text and tool results never leave the machine. Events ride on the Guidance reads the Listener makes anyway; the session end
+// carries the rest.
+export type Activity = 'Klären' | 'Planen' | 'Bauen' | 'Prüfen' | 'Liefern'
+type ToolEvent = { kind: 'tool'; id: string; at: number; actor: string; tool: string; activity: Activity; error: boolean; paths: string[]; outside: boolean }
+type InjectionEvent = { kind: 'injection'; id: string; at: number; actor: string; origin: 'guidance' | 'hint' | 'wake' | 'post' | 'cache-guard'; reason: string; ref?: string }
+export type SessionEvent = ToolEvent | InjectionEvent
+// One request carries at most BATCH events; an unreachable Leitstand keeps at most MAX_EVENTS, the oldest go first.
+const BATCH = 200
+const MAX_EVENTS = 1000
+const MAIN = 'main'
+// Path arguments are read only from the built-in file tools; any other tool's `path` may be anything (Q3).
+const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'NotebookEdit', 'Grep', 'Glob'])
+
+const PRUEFEN_TOOLS = new Set(['computer', 'browser_batch', 'preview_start', 'navigate', 'find', 'read_page', 'get_page_text', 'javascript_tool'])
+const PLANEN_TOOLS = new Set(['Agent', 'Task', 'update_plan', 'wrap_up', 'TodoWrite', 'mark_chapter', 'set_session_title'])
+const PLANEN_LEITSTAND = new Set(['leitstand_question_update', 'leitstand_todo', 'leitstand_todo_update', 'leitstand_question', 'leitstand_round',
+  'leitstand_memory', 'leitstand_state_patch'])
+const LIEFERN_LEITSTAND = new Set(['leitstand_upload_open', 'leitstand_upload_approve', 'leitstand_post_send', 'leitstand_panel'])
+
+// A shell command by its kind; the command itself stays local.
+export function bashActivity(command: string): Activity {
+  if (/git push|git commit|npm run deploy|gf live|gh pr |gh release|upload (artifact|file)|git worktree remove|git branch -d/.test(command)) return 'Liefern'
+  if (/--check|node --test|npm (run )?test|vitest|jest|pytest|cargo test|go test|\btsc\b|\blint\b|screenshot|--headless|git diff|git status|\bdiff\b|\bcmp\b|shasum/.test(command)) return 'Prüfen'
+  if (/sed -i|\bmkdir\b|\bcp\b|\bmv\b|\btee\b|\btouch\b|\brm\b|rsync|\bcat\s*>|open\([^)]*,\s*['"]w['"]\)|(?<![\d&])\s>{1,2}\s*("?[$~/]|[\w.-]+\.\w{1,5}\b)/
+    .test(command.replaceAll('>/dev/null', ''))) return 'Bauen'
+  return 'Klären'
+}
+
+// The tool as the agent used it: the Front Door's `name`, an MCP tool without its server prefix, or the built-in tool.
+export function logicalTool(e: { tool: unknown; name?: unknown }): string {
+  const last = String(e.tool).split('__').at(-1)!
+  return (last === 'tools_call' || last === 'tools_call_write') && typeof e.name === 'string' && e.name ? e.name : last
+}
+
+export function activity(e: { tool: unknown; name?: unknown; command?: unknown }): Activity {
+  const last = String(e.tool).split('__').at(-1)!
+  const tool = logicalTool(e)
+  if (last === 'Bash') return bashActivity(String(e.command ?? ''))
+  if (last === 'Edit' || last === 'Write' || last === 'NotebookEdit') return 'Bauen'
+  if (PLANEN_TOOLS.has(last) || PLANEN_LEITSTAND.has(tool)) return 'Planen'
+  if (last === 'SubagentHandback' || LIEFERN_LEITSTAND.has(tool)) return 'Liefern'
+  if (PRUEFEN_TOOLS.has(last)) return 'Prüfen'
+  return 'Klären'
+}
+
+// An absolute, normalized path for a path argument; relative ones resolve against the session's working directory.
+function absolute(path: string, cwd: string): string | undefined {
+  const full = path.startsWith('/') ? path : path.startsWith('~') ? undefined : cwd + '/' + path
+  if (!full) return undefined
+  const parts: string[] = []
+  for (const part of full.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return '/' + parts.join('/')
+}
+
+type Thread = { projectId: string; threadId: string; role?: string; registered?: number; title?: string; openQuestions?: number; url?: string; roundUrl?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
 type Saved = { cursors: Record<string, string>; delivered: string[]; guidance: string[]; toAck: Ack[]; updatedAt: number }
 type Facts = { provider: string; providerSessionId: string; host: string; workspace: string; model?: string; effort?: string }
@@ -171,6 +231,13 @@ const S = {
   manyQuestions: false,
   // The band lists every Vorhaben instead of folding those without open questions.
   expanded: false,
+  cwd: '',
+  // Events not yet carried to Leitstand, oldest first.
+  events: [] as SessionEvent[],
+  // The thread the events belong to, chosen once and kept while it stays registered.
+  eventThreadId: undefined as string | undefined,
+  // Repository root of each directory looked at, or null outside any repository.
+  roots: new Map<string, string | null>(),
 }
 
 const storeKey = () => 'session:' + S.facts!.providerSessionId
@@ -218,6 +285,84 @@ async function update($: EngineInterface, change: (state: Saved) => void) {
 
 const sameAck = (a: Ack, b: Ack) => a.threadId === b.threadId && a.postId === b.postId && a.noticeId === b.noticeId
 
+// The events belong to the Vorhaben whose work they are: the session's one lead thread, else its earliest registered one.
+// Kept across refreshes, whatever order they report, while it stays registered.
+function eventThread(): Thread | undefined {
+  const kept = S.threads.find(t => t.threadId === S.eventThreadId)
+  if (kept) return kept
+  const leads = S.threads.filter(t => t.role === 'lead')
+  const chosen = leads.length === 1 ? leads[0] : [...S.threads].sort((a, b) => (a.registered ?? Infinity) - (b.registered ?? Infinity))[0]
+  S.eventThreadId = chosen?.threadId
+  return chosen
+}
+
+// Only a session registered to a Vorhaben records events.
+function record(event: SessionEvent) {
+  if (!S.threads.length) return
+  S.events.push(event)
+  if (S.events.length > MAX_EVENTS) S.events.splice(0, S.events.length - MAX_EVENTS)
+}
+
+async function inject($: EngineInterface, origin: InjectionEvent['origin'], reason: string, ref?: string) {
+  record({ kind: 'injection', id: crypto.randomUUID(), at: Math.floor(await $.clock.now()), actor: MAIN, origin, reason: reason.slice(0, 128),
+    ...(ref ? { ref: ref.slice(0, 128) } : {}) })
+}
+
+async function repositoryRoot($: EngineInterface, dir: string): Promise<string | null> {
+  const seen: string[] = []
+  let root: string | null = null
+  for (let current = dir; ; current = current.slice(0, current.lastIndexOf('/')) || '/') {
+    if (S.roots.has(current)) { root = S.roots.get(current)!; break }
+    seen.push(current)
+    let found = false
+    try { found = await $.fs.exists((current === '/' ? '' : current) + '/.git') } catch { /* unreadable: keep walking up */ }
+    if (found) { root = current; break }
+    if (current === '/') break
+  }
+  for (const dir of seen) S.roots.set(dir, root)
+  return root
+}
+
+// Repository-relative paths of a call's path arguments; a path outside every repository only counts as outside.
+async function repoPaths($: EngineInterface, e: Record<string, unknown>): Promise<{ paths: string[]; outside: boolean }> {
+  const paths: string[] = []
+  let outside = false
+  if (!FILE_TOOLS.has(String(e.tool))) return { paths, outside }
+  for (const value of [e.file_path, e.notebook_path, e.path]) {
+    if (typeof value !== 'string' || !value) continue
+    const full = absolute(value, S.cwd)
+    const root = full ? await repositoryRoot($, full) : null
+    if (!full || !root) { outside = true; continue }
+    const relative = full === root ? '.' : full.slice(root === '/' ? 1 : root.length + 1)
+    if (!paths.includes(relative)) paths.push(relative.slice(0, 512))
+  }
+  return { paths, outside }
+}
+
+async function recordTool($: EngineInterface, e: Record<string, unknown> & { tool: unknown }, at: number, error: boolean) {
+  if (!S.threads.length) return
+  const { paths, outside } = await repoPaths($, e)
+  record({ kind: 'tool', id: typeof e.tool_use_id === 'string' && e.tool_use_id ? e.tool_use_id.slice(0, 128) : crypto.randomUUID(),
+    at: Math.floor(at), actor: typeof e.agentId === 'string' ? e.agentId.slice(0, 128) : MAIN, tool: logicalTool(e).slice(0, 128) || '?',
+    activity: activity(e), error, paths, outside })
+}
+
+// A Guidance read of the event thread carries the buffered events. They leave the buffer once Leitstand answered, also with
+// eventsError (stored nothing, a resend would not help) or a refusal; a network failure keeps them for the next read.
+async function guidanceRead($: EngineInterface, thread: Thread, args: Record<string, unknown>) {
+  const events = thread.threadId === eventThread()?.threadId ? S.events.slice(0, BATCH) : []
+  const settle = () => { if (events.length) S.events = S.events.filter(event => !events.includes(event)) }
+  try {
+    const value = await call($, 'leitstand_guidance', events.length ? { ...args, events } : args)
+    settle()
+    if (typeof value.eventsError === 'string') note($, 'Ereignisse verworfen: ' + value.eventsError.slice(0, 200))
+    return value
+  } catch (error) {
+    if (error instanceof ToolError) settle()
+    throw error
+  }
+}
+
 async function run($: EngineInterface, argv: string[]): Promise<string> {
   try { const done = await $.process.run(argv, { timeoutMs: 3000 }); return done.exitCode === 0 ? done.stdout.trim() : '' }
   catch { return '' }
@@ -225,6 +370,7 @@ async function run($: EngineInterface, argv: string[]): Promise<string> {
 
 async function sessionFacts($: EngineInterface): Promise<Facts> {
   const cwd = await $.session.cwd()
+  S.cwd = cwd
   const host = (await run($, ['scutil', '--get', 'LocalHostName'])) || (await run($, ['hostname', '-s']))
   let workspace = normalizeRemote(await run($, ['git', '-C', cwd, 'remote', 'get-url', 'origin']))
   if (!workspace) {
@@ -293,10 +439,11 @@ async function tick($: EngineInterface, mine: number) {
     for (const thread of S.threads) {
       if (mine !== S.generation) return
       const route = { projectId: thread.projectId, threadId: thread.threadId, providerSessionId: facts.providerSessionId }
-      const guidance = pendingGuidance(await call($, 'leitstand_guidance', { ...route, deliveryTarget: 'machine' }), (await load($)).guidance)
+      const guidance = pendingGuidance(await guidanceRead($, thread, { ...route, deliveryTarget: 'machine' }), (await load($)).guidance)
       if (guidance) {
         await update($, state => { state.guidance.push(guidance.id) })
         await wake($, guidanceMessage(guidance.text, route))
+        await inject($, 'guidance', 'wake', guidance.id)
         return schedule($, 0)
       }
       const slot = thread.projectId + ':' + thread.threadId
@@ -345,6 +492,7 @@ async function tick($: EngineInterface, mine: number) {
       })
       const queued = S.busy
       await wake($, wakeMessage(thread, events, posts, facts.providerSessionId))
+      for (const event of events) await inject($, event.kind === 'post_received' ? 'post' : 'wake', event.kind, event.id)
       // Submitted to an idle session, the woken turn has started: the next completed turn has processed these.
       // Behind a running turn it is only queued; the next main-loop turn.start arms them instead.
       if (!queued) await update($, state => { for (const item of state.toAck) if (fresh.some(f => sameAck(f, item))) item.armed = true })
@@ -471,11 +619,12 @@ async function boundaryGuidance($: EngineInterface, toolName: string) {
     const shown = (await load($)).guidance
     for (const thread of S.threads) {
       const route = { projectId: thread.projectId, threadId: thread.threadId, providerSessionId: S.facts!.providerSessionId }
-      const item = pendingGuidance(await call($, 'leitstand_guidance',
+      const item = pendingGuidance(await guidanceRead($, thread,
         { ...route, deliveryTarget: 'machine', boundary: 'tool', toolName, omitIds: shown.slice(-200) }), shown)
       if (!item) continue
       await update($, state => { state.guidance.push(item.id) })
       await append($, guidanceMessage(item.text, route))
+      await inject($, 'guidance', 'tool-boundary', item.id)
       break
     }
   } catch (error) {
@@ -496,6 +645,7 @@ async function boundary($: EngineInterface, tool: string, projectId: unknown) {
     S.stoppedShown = true
     if (S.stoppedReason === PERMISSION) S.permissionShown = true
     await append($, `LEITSTAND GUIDANCE: Der Leitstand-Listener dieser Session ist gestoppt (${S.stoppedReason}). Posts wecken die Session nicht, bis er wieder läuft.`)
+    await inject($, 'hint', 'listener-stopped')
   }
   // Only a session without any registered thread is asked to register: a session already registered to a Vorhaben
   // that touches another one (read, cross-project Post) must not open a second thread there.
@@ -514,7 +664,15 @@ async function end($: EngineInterface, sessionId: string, reason: string) {
   S.permissionShown = false
   S.nudged.clear()
   S.manyQuestions = false
-  try { await session($, 'end') } catch (error) { note($, 'leitstand_session end: ' + message(error)) }
+  // The session end carries the events no Guidance read took along.
+  const target = eventThread()
+  const items = target ? S.events.slice(0, BATCH) : []
+  try {
+    await session($, 'end', items.length ? { events: { projectId: target!.projectId, threadId: target!.threadId, items } } : {})
+  } catch (error) { note($, 'leitstand_session end: ' + message(error)) }
+  S.events = []
+  S.eventThreadId = undefined
+  S.roots.clear()
   try { await $.store.delete(storeKey()) } catch { /* pruned at a later start */ }
   S.facts = undefined
   S.threads = []
@@ -544,7 +702,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
-    guardTurnComplete($, e)
+    guardTurnComplete($, e, text => void inject($, 'cache-guard', text === PING ? 'idle-ping' : 'keep-warm'))
     const done = await next(e)
     if (e.agentId !== undefined || !S.facts) return done
     S.busy = false
@@ -559,14 +717,20 @@ export const register: Register = on => {
     e.props.hasSurvey || (S.stoppedReason === undefined && !S.threads.length) ? next(e) : band($, e, e.props.bodyColumns))
 
   // Tool boundary: pending Guidance, a missing attribution hint and a stopped Listener reach the model.
+  // Every call, a subagent's too, becomes an event once it has run; recording it never delays the tool.
   on('tool.call', async ($, e, next) => {
     guardToolCall(e as { tool: unknown; agentId?: string })
-    if (e.agentId !== undefined || !S.facts) return next(e)
+    if (!S.facts) return next(e)
+    const at = await $.clock.now()
     const { tool, projectId } = logicalCall(e as Parameters<typeof logicalCall>[0])
-    await boundary($, tool, projectId)
+    if (e.agentId === undefined) await boundary($, tool, projectId)
     const result = await next(e)
+    void recordTool($, e as never, at, result.isError === true || result.deny !== undefined)
+      .catch(error => note($, 'Ereignis nicht erfasst: ' + message(error)))
+    if (e.agentId !== undefined) return result
     const hint = S.threads.length && !S.nudged.has('artifact') && artifactCall(e as never) ? ARTIFACT_HINT : undefined
     if (hint) S.nudged.add('artifact')
+    if (hint && result.deny === undefined) await inject($, 'hint', 'artifact')
     // A fresh registration or an own question change is visible at once instead of after the next refresh.
     if (/(?:^|__)leitstand_(thread|start|take_over|resume|round|question|question_update|question_close|answer)$/.test(tool)) S.refreshedAt = -Infinity
     return hint && result.deny === undefined ? { ...result, context: [...(result.context ?? []), hint] } : result
@@ -577,8 +741,10 @@ export const register: Register = on => {
     const dropped = guardPromptSubmit(e)
     if (dropped) return dropped
     if (!S.facts || !S.threads.length || e.isMeta || e.command || !HUMAN_ORIGINS.has(e.origin?.kind ?? 'unclassified')) return next(e)
+    const before = new Set(S.nudged)
     const hints = glossaryHints(e.text, S.nudged)
-    if (S.manyQuestions) hints.push(QUESTION_HINT)
+    for (const key of S.nudged) if (!before.has(key)) await inject($, 'hint', 'glossary:' + key)
+    if (S.manyQuestions) { hints.push(QUESTION_HINT); await inject($, 'hint', 'many-questions') }
     S.manyQuestions = false
     return next(hints.length ? { ...e, context: [...(e.context ?? []), ...hints] } : e)
   })

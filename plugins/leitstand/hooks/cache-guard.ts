@@ -72,7 +72,8 @@ export function guardTurnStart(e: Pick<TurnStartInput, 'agentId'>) {
   } catch { /* a broken guard stays out of the way */ }
 }
 
-export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput, 'agentId'>) {
+// `pinged` learns each ping or keep-warm text once it was submitted.
+export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput, 'agentId'>, pinged?: (text: string) => void) {
   try {
     if (e.agentId !== undefined) return
     stop()
@@ -87,7 +88,7 @@ export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput,
       decisionOpen = false
       pinging = true
       handedOver = false
-      void $.prompt.submit({ text }).catch(() => { pinging = false })
+      void $.prompt.submit({ text }).then(() => pinged?.(text), () => { pinging = false })
     })
   } catch { /* a broken guard stays out of the way */ }
 }
