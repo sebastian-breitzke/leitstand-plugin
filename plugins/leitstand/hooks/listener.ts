@@ -169,6 +169,8 @@ const S = {
   // Nudges already shown this session (glossary keys and 'artifact'); a many-questions answer waits for the next prompt.
   nudged: new Set<string>(),
   manyQuestions: false,
+  // The band lists every Vorhaben instead of folding those without open questions.
+  expanded: false,
 }
 
 const storeKey = () => 'session:' + S.facts!.providerSessionId
@@ -398,7 +400,8 @@ function restart($: EngineInterface) {
 const questions = (n: number) => `${n} ${n === 1 ? 'Frage' : 'Fragen'} offen`
 
 // The band above the prompt: the Listener's state once, then the Vorhaben with open questions, most first, each count
-// a red pill linking its Fragerunde; the others fold into one line. One Vorhaben is one line. A stopped Listener shows why and the way back.
+// a red pill linking its Fragerunde; the others fold into one line that unfolds on request. One Vorhaben is one line.
+// A stopped Listener shows why and the way back.
 // It draws nothing for a session without a Vorhaben and a running Listener.
 function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], columns: number) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
@@ -423,14 +426,19 @@ function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']
   const open = projects.filter(t => t.openQuestions).sort((a, b) => b.openQuestions! - a.openQuestions!)
   const total = open.reduce((sum, t) => sum + t.openQuestions!, 0)
   const rest = projects.length - open.length
+  const shown = S.expanded ? [...open, ...projects.filter(t => !t.openQuestions)] : open
   // Titles share one column so the counts line up; long titles truncate.
-  const width = Math.max(10, Math.min(Math.max(0, ...open.map(t => (t.title || 'Vorhaben').length)), columns - 20))
+  const width = Math.max(10, Math.min(Math.max(0, ...shown.map(t => (t.title || 'Vorhaben').length)), columns - 20))
+  const toggle = () => { S.expanded = !S.expanded; $.ui.invalidate('ui.render') }
   return Box({ flexDirection: 'column', children: [
     Box({ flexDirection: 'row', gap: 1, children: [dot, Text({ dimColor: true,
-      children: [`Leitstand ${state}`, `${projects.length} Vorhaben`, ...(total ? [questions(total)] : [])].join(' · ') })] }),
-    ...open.map(t => Box({ flexDirection: 'row', gap: 2, paddingLeft: 2, children: [
-      Box({ width, children: Text({ wrap: 'truncate-end', children: t.title || 'Vorhaben' }) }), count(t)] })),
-    ...(rest && open.length ? [Box({ paddingLeft: 2, children: Text({ dimColor: true, children: `+ ${rest} Vorhaben ohne offene Fragen` }) })] : []),
+      children: [`Leitstand ${state}`, `${projects.length} Vorhaben`, ...(total ? [questions(total)] : [])].join(' · ') }),
+      ...(rest ? [Button({ key: 'expand', label: S.expanded ? 'zuklappen' : 'aufklappen', onPress: toggle })] : [])] }),
+    ...shown.map(t => Box({ flexDirection: 'row', gap: 2, paddingLeft: 2, children: [
+      Box({ width, children: Text({ wrap: 'truncate-end', children: t.title || 'Vorhaben' }) }),
+      ...(t.openQuestions ? [count(t)] : t.url ? [Link({ href: t.url, label: 'öffnen' })] : [])] })),
+    ...(rest && open.length && !S.expanded
+      ? [Box({ paddingLeft: 2, children: Text({ dimColor: true, children: `+ ${rest} Vorhaben ohne offene Fragen` }) })] : []),
   ] })
 }
 
