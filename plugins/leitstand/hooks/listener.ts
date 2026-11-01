@@ -324,6 +324,8 @@ async function tick($: EngineInterface, mine: number) {
         if (value.events.length && value.hasMore !== true) delay = Math.max(delay, wait - ((await $.clock.now()) - asked))
         continue
       }
+      // An answered or returned question changes the band's open count: refresh with the next tick.
+      if (events.some(e => e.kind === 'answer_submitted' || e.kind === 'question_returned')) S.refreshedAt = -Infinity
       const posts: Record<string, string> = {}
       for (const event of events.filter(e => e.kind === 'post_received')) {
         try {
@@ -565,8 +567,8 @@ export const register: Register = on => {
     const result = await next(e)
     const hint = S.threads.length && !S.nudged.has('artifact') && artifactCall(e as never) ? ARTIFACT_HINT : undefined
     if (hint) S.nudged.add('artifact')
-    // A fresh registration is visible at once instead of after the next refresh.
-    if (/(?:^|__)leitstand_(thread|start|take_over|resume)$/.test(tool)) S.refreshedAt = -Infinity
+    // A fresh registration or an own question change is visible at once instead of after the next refresh.
+    if (/(?:^|__)leitstand_(thread|start|take_over|resume|round|question|question_update|question_close|answer)$/.test(tool)) S.refreshedAt = -Infinity
     return hint && result.deny === undefined ? { ...result, context: [...(result.context ?? []), hint] } : result
   })
 
