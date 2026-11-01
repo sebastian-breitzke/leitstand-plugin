@@ -323,7 +323,7 @@ async function repositoryRoot($: EngineInterface, dir: string): Promise<string |
   return root
 }
 
-// Repository-relative paths of a call's path arguments; a path outside every repository only counts as outside.
+// Repository-relative paths of a call's path arguments that name something real; a path outside every repository only counts as outside.
 async function repoPaths($: EngineInterface, e: Record<string, unknown>): Promise<{ paths: string[]; outside: boolean }> {
   const paths: string[] = []
   let outside = false
@@ -333,6 +333,10 @@ async function repoPaths($: EngineInterface, e: Record<string, unknown>): Promis
     const full = absolute(value, S.cwd)
     const root = full ? await repositoryRoot($, full) : null
     if (!full || !root) { outside = true; continue }
+    // The call has run: a path that names nothing on disk is made up (a crafted argument can hold anything) and is not sent.
+    let real = false
+    try { real = await $.fs.exists(full) } catch { /* unreadable: not sent */ }
+    if (!real) continue
     const relative = full === root ? '.' : full.slice(root === '/' ? 1 : root.length + 1)
     if (!paths.includes(relative)) paths.push(relative.slice(0, 512))
   }

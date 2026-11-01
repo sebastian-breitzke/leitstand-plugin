@@ -28,6 +28,10 @@ class ListenerError(Exception):
     pass
 
 
+class ToolError(ListenerError):
+    """Leitstand answered the tool call with an error: the request arrived, a resend of its events would not help."""
+
+
 class Native:
     def __init__(self, session_id):
         self.session_id = session_id
@@ -164,7 +168,7 @@ class Native:
         result = self.request("mcpServer/tool/call", {"threadId": self.session_id, "server": "leitstand",
                               "tool": "tools_call", "arguments": door(name, arguments)}, timeout)
         if result.get("isError"):
-            raise ListenerError(f"{name}: MCP-Fehler; native Verbindung und Session-Zuordnung prüfen.")
+            raise ToolError(f"{name}: MCP-Fehler; native Verbindung und Session-Zuordnung prüfen.")
         value = result.get("structuredContent")
         if not isinstance(value, dict):
             texts = [c["text"] for c in result.get("content", []) if c.get("type") == "text"]
@@ -297,6 +301,7 @@ def deliver(native, store, thread, event):
                    "input": [{"type": "text", "text": text}]})
     with store.update() as state:
         state["deliveries"][key] = "enqueued"
+    record(store, [injection("post" if event["kind"] == "post_received" else "wake", event["kind"], event["id"])])
     # A queue receipt deliberately does not cause an MCP acknowledgment.
     return True
 
@@ -347,23 +352,193 @@ def listen(native, store):
                 time.sleep(max(0, min(5, wait / 1000 - (time.monotonic() - started))))
 
 
+# Event stream (mirror of the Claude Code Listener, listener.ts owns the canonical rules): every tool call of the session and
+# everything this plugin puts into the model's context. Metadata only: the logical tool, its activity, repository-relative paths
+# of file tools, origin and reason. Commands, patch contents, user text and tool results never leave the machine (Q3). Events
+# wait in the session state and ride on the Guidance read of the PreToolUse hook and on the session end; no request of their own.
+# Codex has no post-tool hook, so a call is recorded before it runs and `error` is always false. Subagent hooks return early.
+BATCH = 200
+MAX_EVENTS = 1000
+MAIN = "main"
+SHELL_TOOLS = {"Bash", "shell", "shell_command", "exec_command", "local_shell", "container.exec", "unified_exec"}
+BAUEN_TOOLS = {"apply_patch", "Edit", "Write"}
+# Path arguments are read only from the file tools; any other tool's `path` may be anything.
+FILE_TOOLS = BAUEN_TOOLS
+PRUEFEN_TOOLS = {"computer", "browser_batch", "preview_start", "navigate", "find", "read_page", "get_page_text", "javascript_tool"}
+PLANEN_TOOLS = {"Agent", "Task", "spawn_agent", "update_plan", "wrap_up", "TodoWrite", "mark_chapter", "set_session_title"}
+PLANEN_LEITSTAND = {"leitstand_question_update", "leitstand_todo", "leitstand_todo_update", "leitstand_question", "leitstand_round",
+                    "leitstand_memory", "leitstand_state_patch"}
+LIEFERN_LEITSTAND = {"leitstand_upload_open", "leitstand_upload_approve", "leitstand_post_send", "leitstand_panel"}
+LIEFERN_SHELL = re.compile(r"git push|git commit|npm run deploy|gf live|gh pr |gh release|upload (artifact|file)|git worktree remove|git branch -d")
+PRUEFEN_SHELL = re.compile(r"--check|node --test|npm (run )?test|vitest|jest|pytest|cargo test|go test|\btsc\b|\blint\b|screenshot|--headless|git diff|git status|\bdiff\b|\bcmp\b|shasum")
+BAUEN_SHELL = re.compile(r"sed -i|\bmkdir\b|\bcp\b|\bmv\b|\btee\b|\btouch\b|\brm\b|rsync|\bcat\s*>|open\([^)]*,\s*['\"]w['\"]\)|(?<![\d&])\s>{1,2}\s*(\"?[$~/]|[\w.-]+\.\w{1,5}\b)")
+# An apply_patch run through the shell, also wrapped in `bash -lc`: Bauen, whatever text the patch body holds.
+SHELL_PATCH = re.compile(r"""\s*(?:(?:/\S*/)?(?:ba|z)?sh\s+-\w*c\s+)?['"]?\s*apply_patch\b""")
+# A made-up path argument is not sent: it must name something real, or be a plausible new file in an existing directory.
+NEW_FILE = re.compile(r"[\w.-]+\.\w{1,10}")
+PATCH_FILE = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)\s*$", re.M)
+
+
+def bash_activity(command):
+    """A shell command by its kind; the command itself stays local."""
+    if SHELL_PATCH.match(command):
+        return "Bauen"
+    if LIEFERN_SHELL.search(command):
+        return "Liefern"
+    if PRUEFEN_SHELL.search(command):
+        return "Prüfen"
+    if BAUEN_SHELL.search(command.replace(">/dev/null", "")):
+        return "Bauen"
+    return "Klären"
+
+
+def logical_tool(payload):
+    """The tool as the agent used it: the Front Door's `name`, an MCP tool without its server prefix, or the built-in tool."""
+    last = str(payload.get("tool_name") or "").split("__")[-1]
+    tool_input = payload.get("tool_input")
+    name = tool_input.get("name") if isinstance(tool_input, dict) else None
+    return name if last in ("tools_call", "tools_call_write") and isinstance(name, str) and name else last
+
+
+def shell_command(payload):
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return ""
+    command = tool_input.get("command") or tool_input.get("cmd") or ""
+    return " ".join(map(str, command)) if isinstance(command, list) else str(command)
+
+
+def activity(payload):
+    last = str(payload.get("tool_name") or "").split("__")[-1]
+    tool = logical_tool(payload)
+    if last in SHELL_TOOLS:
+        return bash_activity(shell_command(payload))
+    if last in BAUEN_TOOLS:
+        return "Bauen"
+    if last in PLANEN_TOOLS or tool in PLANEN_LEITSTAND:
+        return "Planen"
+    if tool in LIEFERN_LEITSTAND:
+        return "Liefern"
+    if last in PRUEFEN_TOOLS:
+        return "Prüfen"
+    return "Klären"
+
+
+def repo_paths(payload):
+    """Repository-relative paths of a file tool's path arguments; a path outside every repository only counts as outside."""
+    paths, outside = [], False
+    last = str(payload.get("tool_name") or "").split("__")[-1]
+    tool_input = payload.get("tool_input")
+    if last not in FILE_TOOLS or not isinstance(tool_input, dict):
+        return paths, outside
+    values = [tool_input.get("file_path"), tool_input.get("path")]
+    command = tool_input.get("command")
+    if last == "apply_patch" and isinstance(command, str):
+        values += PATCH_FILE.findall(command)
+    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else "/"
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        if value.startswith("~"):
+            outside = True
+            continue
+        full = os.path.normpath(value if value.startswith("/") else os.path.join(cwd, value))
+        root = full
+        while not os.path.exists(os.path.join(root, ".git")) and root != "/":
+            root = os.path.dirname(root)
+        if root == "/" and not os.path.exists("/.git"):
+            outside = True
+            continue
+        if not os.path.exists(full) and not (os.path.isdir(os.path.dirname(full)) and NEW_FILE.fullmatch(os.path.basename(full))):
+            continue
+        relative = "." if full == root else full[len(root.rstrip("/")) + 1:]
+        if relative[:512] not in paths:
+            paths.append(relative[:512])
+    return paths, outside
+
+
+def tool_event(payload):
+    paths, outside = repo_paths(payload)
+    tool_use_id = payload.get("tool_use_id")
+    return {"kind": "tool", "id": tool_use_id[:128] if isinstance(tool_use_id, str) and tool_use_id else str(uuid.uuid4()),
+            "at": int(time.time() * 1000), "actor": MAIN, "tool": logical_tool(payload)[:128] or "?",
+            "activity": activity(payload), "error": False, "paths": paths[:20], "outside": outside}
+
+
+def injection(origin, reason, ref=None):
+    return {"kind": "injection", "id": str(uuid.uuid4()), "at": int(time.time() * 1000), "actor": MAIN, "origin": origin,
+            "reason": reason[:128], **({"ref": ref[:128]} if ref else {})}
+
+
+def record(store, events):
+    """Only a session registered to a Vorhaben records events; the buffer keeps the newest MAX_EVENTS.
+    Telemetry never costs the Guidance read or the Listener: a failure skips the events."""
+    try:
+        with store.update() as state:
+            if state.get("threads") and not state.get("ended"):
+                state["events"] = (state.get("events", []) + events)[-MAX_EVENTS:]
+    except Exception:
+        pass
+
+
+def record_tool(store, payload):
+    try:
+        record(store, [tool_event(payload)])
+    except Exception:
+        pass
+
+
+def event_thread(state):
+    """The events belong to the Vorhaben whose work they are: the session's one lead thread, else its earliest registered one.
+    Kept across refreshes while it stays registered. Call inside store.update()."""
+    threads = state.get("threads", [])
+    kept = next((t for t in threads if t["threadId"] == state.get("eventThreadId")), None)
+    if not kept:
+        leads = [t for t in threads if t.get("role") == "lead"]
+        kept = leads[0] if len(leads) == 1 else min(threads, key=lambda t: t.get("registered") or float("inf"), default=None)
+        state["eventThreadId"] = kept["threadId"] if kept else None
+    return kept
+
+
+def settle(store, events):
+    """Leitstand answered (also with eventsError or a refusal): the batch leaves the buffer; a failed transport keeps it."""
+    if events:
+        sent = {event["id"] for event in events}
+        with store.update() as state:
+            state["events"] = [e for e in state.get("events", []) if e["id"] not in sent]
+
+
 def guidance(native, store, payload, hint=""):
+    with store.update() as current:
+        target = event_thread(current)
+        batch = current.get("events", [])[:BATCH]
     state = store.read()
     chunks = []
     for thread in state.get("threads", []):
-        target = route(thread, native.session_id)
-        result = native.tool("leitstand_guidance", {**target, "boundary": "tool", "deliveryTarget": "machine",
-                             "omitIds": state.get("guidance", [])[-200:],
-                             "toolName": str(payload.get("tool_name") or "unknown")[:128]})
+        route_args = route(thread, native.session_id)
+        carried = batch if target and thread["threadId"] == target["threadId"] else []
+        args = {**route_args, "boundary": "tool", "deliveryTarget": "machine",
+                "omitIds": state.get("guidance", [])[-200:],
+                "toolName": str(payload.get("tool_name") or "unknown")[:128]}
+        try:
+            result = native.tool("leitstand_guidance", {**args, "events": carried} if carried else args)
+        except ToolError:
+            settle(store, carried)
+            raise
+        # An invalid batch stored nothing (eventsError) and a resend would not help: it is dropped like an accepted one.
+        settle(store, carried)
+        if isinstance(result.get("eventsError"), str):
+            sys.stderr.write("Ereignisse verworfen: " + result["eventsError"][:200] + "\n")
         for item in result.get("guidance", []):
             chunks.append({"coordinationData": item, "acknowledge": acknowledge("leitstand_guidance", {
-                **target, "action": "acknowledge", "ids": [item["id"]]})})
+                **route_args, "action": "acknowledge", "ids": [item["id"]]})})
     text = HEAD + "\n" + json.dumps(chunks) if chunks else ""
     if len(text.encode()) > 24000:
         raise ListenerError("Guidance überschreitet Hook-Budget; native tools_call leitstand_guidance direkt lesen.")
     if chunks or hint:
         print_context("PreToolUse", "\n\n".join(part for part in (text, hint) if part))
     if chunks:
+        record(store, [injection("guidance", "tool-boundary", c["coordinationData"]["id"]) for c in chunks])
         with store.update() as current:
             current["guidance"] = (current.get("guidance", []) + [c["coordinationData"]["id"] for c in chunks])[-200:]
 
@@ -442,6 +617,7 @@ def pre_tool_hint(state, payload, store):
         return ""
     with store.update() as current:
         current["nudged"] = current.get("nudged", []) + ["artifact"]
+    record(store, [injection("hint", "artifact")])
     return ARTIFACT_HINT
 
 
@@ -450,9 +626,13 @@ def prompt_hints(state, payload, store):
         return []
     with store.update() as current:
         seen = current.setdefault("nudged", [])
+        before = set(seen)
         hints = glossary_hints(str(payload.get("prompt") or ""), seen)
+        reasons = ["glossary:" + key for key in seen if key not in before]
         if current.pop("manyQuestions", False):
             hints.append(QUESTION_HINT)
+            reasons.append("many-questions")
+    record(store, [injection("hint", reason) for reason in reasons])
     return hints
 
 
@@ -474,6 +654,8 @@ def hook(event, payload, store):
     if event == "PreToolUse":
         if not state.get("facts"):
             return
+        if assigned(state):
+            record_tool(store, payload)
         hint = pre_tool_hint(state, payload, store)
         if state.get("error"):
             with store.update() as current:
@@ -482,6 +664,7 @@ def hook(event, payload, store):
                         print_context(event, hint)
                     return
                 current["errorShown"] = state["error"]
+            record(store, [injection("hint", "listener-stopped")])
             print_context(event, "\n\n".join(("Leitstand-Listener gestoppt: " + state["error"], hint) if hint else ("Leitstand-Listener gestoppt: " + state["error"],)))
             return
         with store.update() as current:
@@ -494,7 +677,14 @@ def hook(event, payload, store):
         native = Native(payload["session_id"])
         try:
             if native.loaded() and store.read().get("facts"):
-                native.tool("leitstand_session", {**store.read()["facts"], "action": "end"}, timeout=1)
+                with store.update() as current:
+                    target = event_thread(current)
+                    items = current.get("events", [])[:BATCH] if target else []
+                # The session end carries the events no Guidance read took along.
+                native.tool("leitstand_session", {**current["facts"], "action": "end",
+                            **({"events": {"projectId": target["projectId"], "threadId": target["threadId"], "items": items}} if items else {})},
+                            timeout=1)
+                settle(store, items)
         finally:
             native.close()
         return
