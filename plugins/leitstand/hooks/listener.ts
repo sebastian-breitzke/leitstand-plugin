@@ -557,7 +557,7 @@ const waiting = (n: number) => n === 1 ? '1 Frage wartet' : `${n} Fragen warten`
 // open questions, most first, each count a warm link to its Fragerunde; the others unfold on request. The dot turns
 // amber while a question waits. One Vorhaben is one line. A stopped Listener shows why and the way back.
 // It draws nothing for a session without a Vorhaben and a running Listener.
-function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], columns: number) {
+function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
   if (S.stoppedReason !== undefined) {
     return Box({ flexDirection: 'row', gap: 1, children: [
@@ -585,14 +585,14 @@ function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']
   }
   const rest = projects.length - open.length
   const shown = S.expanded ? [...open, ...projects.filter(t => !t.openQuestions)] : open
-  // Titles share one column so the counts line up; long titles truncate.
-  const width = Math.max(10, Math.min(Math.max(0, ...shown.map(t => (t.title || 'Vorhaben').length)), columns - 20))
   const toggle = () => { S.expanded = !S.expanded; $.ui.invalidate('ui.render') }
-  return Box({ flexDirection: 'column', children: [
-    Box({ flexDirection: 'row', gap: 1, children: [...head, state,
-      ...(rest ? [Button({ key: 'expand', dimColor: true, label: S.expanded ? 'weniger' : `alle ${projects.length} Vorhaben`, onPress: toggle })] : [])] }),
-    ...shown.map(t => Box({ flexDirection: 'row', gap: 2, paddingLeft: 2, children: [
-      Box({ width, children: title(t) }), ...(t.openQuestions ? [count(t)] : visit(t))] })),
+  // The toggle sits plain at the end of the head line, so the desktop's button height does not crowd the Vorhaben below;
+  // each count follows its title, since cell-wide title columns leave a gap in a proportional font.
+  return Box({ flexDirection: 'column', rowGap: 'sm', children: [
+    Box({ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', children: [
+      Box({ flexDirection: 'row', gap: 1, children: [...head, state] }),
+      ...(rest ? [Button({ key: 'expand', plain: true, dimColor: true, label: S.expanded ? 'weniger' : `alle ${projects.length} Vorhaben`, onPress: toggle })] : [])] }),
+    ...shown.map(t => Box({ flexDirection: 'row', gap: 2, paddingLeft: 2, children: [title(t), ...(t.openQuestions ? [count(t)] : visit(t))] })),
   ] })
 }
 
@@ -718,7 +718,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) =>
-    e.props.hasSurvey || (S.stoppedReason === undefined && !S.threads.length) ? next(e) : band($, e, e.props.bodyColumns))
+    e.props.hasSurvey || (S.stoppedReason === undefined && !S.threads.length) ? next(e) : band($, e))
 
   // Tool boundary: pending Guidance, a missing attribution hint and a stopped Listener reach the model.
   // Every call, a subagent's too, becomes an event once it has run; recording it never delays the tool.
