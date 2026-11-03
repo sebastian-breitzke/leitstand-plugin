@@ -12,6 +12,7 @@ import type { EngineInterface, PromptSubmitInput, Timer, TurnCompleteInput, Turn
 const IDLE_MS = 45 * 60_000
 const HANDOVER_SKILL = 'leitstand:handover'
 const HANDOVER_TOOL = 'leitstand_handover'
+const COMPLETE_TOOL = 'leitstand_project_complete'
 // Origins that are not the user and are dropped while sealed (PromptOrigin kinds). Everything else, an unknown kind included, passes;
 // a missing origin counts as the user's.
 const AUTOMATIC_ORIGINS = new Set([
@@ -34,6 +35,11 @@ export function handoverCall(e: { tool: unknown } & Record<string, unknown>): bo
   return e.name === HANDOVER_TOOL
 }
 
+// Does this tool call complete the Vorhaben? Only the Front Door `tools_call` carries it.
+export function completeCall(e: { tool: unknown } & Record<string, unknown>): boolean {
+  return String(e.tool).endsWith('__tools_call') && e.name === COMPLETE_TOOL
+}
+
 let timer: Timer | undefined
 let sealed = false
 // From the ping until the end of the turn it triggers.
@@ -43,6 +49,8 @@ let handedOver = false
 let decisionOpen = true
 // The session handed over in its latest work; cleared when it works again.
 let settled = false
+// The Vorhaben was completed in the latest work: no further ping until the session works again.
+let completed = false
 
 // No wake while sealed or while the ping turn runs: its handover may still seal the session.
 export const isQuiet = () => sealed || pinging
@@ -56,6 +64,7 @@ export function guardSessionStart() {
   handedOver = false
   decisionOpen = true
   settled = false
+  completed = false
 }
 
 // A /clear starts a new conversation without session.start.
@@ -68,7 +77,7 @@ export function guardTurnStart(e: Pick<TurnStartInput, 'agentId'>) {
   try {
     if (e.agentId !== undefined) return
     stop()
-    if (!pinging) { decisionOpen = true; settled = false }
+    if (!pinging) { decisionOpen = true; settled = false; completed = false }
   } catch { /* a broken guard stays out of the way */ }
 }
 
@@ -80,7 +89,7 @@ export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput,
     if (pinging && handedOver) sealed = true
     pinging = false
     handedOver = false
-    if (sealed) return
+    if (sealed || completed) return
     timer = $.clock.after(IDLE_MS, () => {
       timer = undefined
       if (sealed) return
@@ -96,7 +105,9 @@ export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput,
 // Observes only; the caller always goes on with the call.
 export function guardToolCall(e: { tool: unknown; agentId?: string } & Record<string, unknown>) {
   try {
-    if (e.agentId !== undefined || !handoverCall(e)) return
+    if (e.agentId !== undefined) return
+    if (completeCall(e)) { completed = true; stop(); return }
+    if (!handoverCall(e)) return
     settled = true
     if (pinging) handedOver = true
   } catch { /* see above */ }

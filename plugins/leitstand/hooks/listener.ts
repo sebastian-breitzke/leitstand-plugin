@@ -222,6 +222,8 @@ const S = {
   failures: 0,
   generation: 0,
   stoppedReason: undefined as string | undefined,
+  // `begin` ran or is running in this module instance; a reload leaves it false and no session.start follows.
+  began: false,
   stoppedShown: false,
   permissionShown: false,
   guidanceInFlight: false,
@@ -527,6 +529,7 @@ async function arm($: EngineInterface, fresh: boolean) {
 }
 
 async function begin($: EngineInterface) {
+  S.began = true
   let version = ''
   try { const v = await $.session.version(); version = v.base ?? v.version } catch { /* a build without the call */ }
   if (!newerOrEqual(version, MIN_VERSION)) {
@@ -702,6 +705,8 @@ export const register: Register = on => {
     // A prompt after idle expiry or a stop re-arms the Listener (hook parity: prompt-submit); a failed start begins again.
     if (S.facts && !S.running) void arm($, S.stoppedReason !== undefined)
     else if (!S.facts && S.stoppedReason !== undefined) restart($)
+    // After /reload-plugins the module state is fresh and no session.start follows: the first main-loop turn starts the Listener.
+    else if (!S.facts && !S.began && e.agentId === undefined) restart($)
     return next(e)
   })
 

@@ -26,7 +26,7 @@ Der Leitstand-MCP hat eine Front Door (`tools_search`, `tools_describe`, `tools_
 
 Hinweise ohne Blockade: Ist die Session einem Vorhaben zugeordnet, erinnert der Listener lokal und regelbasiert (kein Netzwerkaufruf, kein Modell) daran, HTML-Ergebnisse per `leitstand_artifact` in den Leitstand zu veröffentlichen, wenn die Session eine HTML-Datei schreibt oder das Artifact-Werkzeug des Clients nutzt. Zauberwörter in deiner Nachricht (Fragerunde, Checkpoint, Übergabe/Handover, Abschluss, Status, Artefakt/ins Material) verweisen einmal pro Session auf den passenden Workflow-Abschnitt, und viele Fragen im Chat auf eine Fragerunde. Codex kennt kein eigenes Artifact-Werkzeug; dort greift nur das Schreiben von HTML-Dateien.
 
-Befehle: `/leitstand:start`, `/leitstand:status`, `/leitstand:brainstorm`, `/leitstand:slice`,
+Befehle: `/leitstand:start`, `/leitstand:status`, `/leitstand:brainstorm`, `/leitstand:navigator`, `/leitstand:slice`,
 `/leitstand:orchestrate`, `/leitstand:checkpoint`, `/leitstand:handover`, `/leitstand:complete`.
 
 ## Codex Desktop und CLI
@@ -40,7 +40,7 @@ codex plugin add leitstand@leitstand
 
 Für den Listener müssen `python3` und ein funktionsfähiges `codex` im `PATH` verfügbar sein.
 
-Die neun Skills stehen nativ unter `leitstand:*` bereit. Trage für den nativen OAuth-Login
+Die zehn Skills stehen nativ unter `leitstand:*` bereit. Trage für den nativen OAuth-Login
 in `config.toml` in deinem `CODEX_HOME` folgende Einstellung ein:
 
 ```toml
@@ -71,11 +71,11 @@ Workspace-Sharing erfordert die passenden Permissions und App-Zugriffe.
 Das aktuelle Codex Cloud startet im Browser über **Work in → Cloud** mit einem veröffentlichten
 Repository-Environment. Prüfe Skills und MCP dort separat. Für klassische Tasks unter `/codex`
 ist kein nativer Plugin-Installationsweg nachgewiesen. Die Web-Verbindung allein installiert noch
-nicht die neun Workflow-Skills und weist keinen Wake nach.
+nicht die zehn Workflow-Skills und weist keinen Wake nach.
 
 ### Workflow-Skills für ein verbundenes Cloud-Plugin exportieren
 
-Maintainer erzeugen die neun Skills aus derselben kanonischen Quelle wie das Marketplace-Paket:
+Maintainer erzeugen die zehn Skills aus derselben kanonischen Quelle wie das Marketplace-Paket:
 
 ```bash
 python3 apps/leitstand/scripts/build-marketplace.py /tmp/leitstand-marketplace --skills-archive /tmp/leitstand-skills.zip
@@ -86,7 +86,7 @@ Update-Overlay, kein installierbares Plugin. Lies vor einem Cloud-Update das bes
 Plugin samt aktuellem Release und Manifesten zurück. Kombiniere dessen exakte Manifeste und
 unveränderte App-Bindung mit den exportierten Skills und aktualisiere denselben Plugin-Eintrag.
 Erfinde keine App-IDs und übernimm keine MCP- oder Hook-Konfiguration aus dem Desktop-Paket.
-Prüfe nach dem Update in einer neuen Browser-Session alle neun Skills und einen Leitstand-Tool-Call.
+Prüfe nach dem Update in einer neuen Browser-Session alle zehn Skills und einen Leitstand-Tool-Call.
 Der Export erstellt oder veröffentlicht kein Account-Plugin und verbindet keine Nutzerkonten.
 
 Offizielle Anleitung: [Custom MCP server](https://developers.openai.com/api/docs/guides/custom-mcp-server),
