@@ -11,11 +11,10 @@ description: Start or resume authorized Leitstand execution when explicitly requ
 Start or resume the accepted work as Kopf. This Skill loads central execution
 guidance; invoking it does not authorize an unaccepted direction.
 
-1. Use `leitstand:start` to resolve the actual project, ownership and exact
-   workflow pin. Load current `core` and `migration` without a version; complete the required safe migration before new dispatch, active work or execution resume. Then load `core`, `orchestration`, `execution` and `routing` through
-   `leitstand_workflow` at that version, using the supported transport and current
-   schemas. These are the same sections `kopf-orchestration` loads. Tool names are names for `tools_call` (the MCP's Front Door: `tools_search`, `tools_describe`, `tools_call`). Reuse them
-   within the same wave; after resume or compaction reload them before work.
+1. Read `../kopf-orchestration/SKILL.md`, relative to this Skill's directory,
+   and follow its one loading procedure before work. That file contains the
+   shared reuse, reload, safe migration and transport failure rules; this
+   reference does not invoke a Skill automatically.
 2. Follow the current start/resume and dispatch rules. Read current State,
    relevant stored task contracts and source bodies; reconcile Auftrag and Go
    with actual ownership and exposed runtime capacity before dispatch. Keep
