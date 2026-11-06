@@ -10,8 +10,10 @@ The pinned `handover` section owns preservation, observed stop, source access,
 registration/transfer, failure handling, resume and continuation requirements.
 
 Hand over only when the Leitstand Cache-Guard ping asked for it or the user
-explicitly asks for a Handover; never on your own initiative. A Handover needs an
-observed stop of every worker this session started (subagents, background jobs).
+explicitly asks for a Handover; never on your own initiative. For inactive
+planning, follow the direct takeover path in central `handover` Guidance.
+An execution Handover needs an observed stop of every running worker this
+session started (subagents, background jobs).
 While one still runs or its stop is not observed, do not hand over: under the
 Cache-Guard, keep the session open and give the reason in one sentence. Open
 decisions stay open: do not decide or close them, and list each one in the
