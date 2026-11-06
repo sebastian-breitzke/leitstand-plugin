@@ -1,10 +1,16 @@
 {
   "name": "leitstand",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "author": {
     "name": "s16e"
   },
   "description": "Zentraler Leitstand mit Memories, Fragerunden und Übergaben.",
+  "interface": {
+    "displayName": "Leitstand",
+    "shortDescription": "Vorhaben gemeinsam steuern.",
+    "logo": "./logo.png",
+    "composerIcon": "./logo.png"
+  },
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/codex.json"
