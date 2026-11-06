@@ -1,7 +1,10 @@
 # Leitstand für Claude Code
 
 Plugin für den Leitstand-Workflow (Vorhaben, Fragerunden, Übergaben) mit der MCP-Verbindung zu
-https://leitstand.s16e.de.
+https://leitstand.run.
+
+Nach dem Wechsel auf leitstand.run: Plugin aktualisieren und die MCP-Verbindung erneut per OAuth freigeben.
+Vorhaben und Arbeitsstände bleiben erhalten; Plugin-Name und bestehende Claude-Allow-Regel bleiben gleich.
 
 ```bash
 claude plugin marketplace add sebastian-breitzke/leitstand-plugin
@@ -13,7 +16,7 @@ aktualisiert Drittanbieter-Marketplaces sonst nicht von selbst. Manuell: `claude
 `claude plugin update leitstand@leitstand`.
 
 Starte danach eine neue Session und öffne `/mcp`, um die Verbindung im Browser freizugeben. Dafür
-braucht es einen Account auf leitstand.s16e.de.
+braucht es einen Account auf leitstand.run.
 
 Der Listener des Plugins weckt eine wartende Session, sobald im Leitstand eine Post für sie eintrifft
 (Claude Code 2.1.295 oder neuer); Posts und Fix-Hinweise wecken ihn. Seine eigenen Aufrufe laufen über deine Berechtigungsregeln; gib sie
@@ -63,7 +66,7 @@ Plugins sind kein öffentlich installierbares Web-Plugin. Ein Paket mit eigener 
 kann als „Desktop only“ erscheinen, auch wenn sein MCP-Server über HTTPS erreichbar ist.
 
 Für eine native Cloud-Verbindung öffne auf ChatGPT Web **Plugins → + → Add custom MCP server**,
-verwende `https://leitstand.s16e.de/mcp`, wähle OAuth und verbinde deinen eigenen Leitstand-Account.
+verwende `https://leitstand.run/mcp`, wähle OAuth und verbinde deinen eigenen Leitstand-Account.
 Installiere danach das erzeugte Plugin und prüfe es in einem neuen Work-Chat. Dritte legen diese
 Verbindung in ihrem eigenen Account an; ein privater Account-Link ersetzt diesen Schritt nicht.
 Workspace-Sharing erfordert die passenden Permissions und App-Zugriffe.
@@ -81,7 +84,7 @@ Maintainer erzeugen die zehn Skills aus derselben kanonischen Quelle wie das Mar
 python3 apps/leitstand/scripts/build-marketplace.py /tmp/leitstand-marketplace --skills-archive /tmp/leitstand-skills.zip
 ```
 
-Der Befehl läuft im Stellwerk-Source-Repo. Das ZIP enthält ausschließlich `skills/` und ist ein
+Der Befehl läuft im Leitstand-Source-Repo. Das ZIP enthält ausschließlich `skills/` und ist ein
 Update-Overlay, kein installierbares Plugin. Lies vor einem Cloud-Update das bestehende App-backed
 Plugin samt aktuellem Release und Manifesten zurück. Kombiniere dessen exakte Manifeste und
 unveränderte App-Bindung mit den exportierten Skills und aktualisiere denselben Plugin-Eintrag.

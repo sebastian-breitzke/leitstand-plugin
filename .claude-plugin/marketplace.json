@@ -8,7 +8,7 @@
     {
       "name": "leitstand",
       "source": "./plugins/leitstand",
-      "description": "Leitstand-Workflow und MCP-Verbindung zu leitstand.s16e.de."
+      "description": "Leitstand-Workflow und MCP-Verbindung zu leitstand.run."
     }
   ]
 }
