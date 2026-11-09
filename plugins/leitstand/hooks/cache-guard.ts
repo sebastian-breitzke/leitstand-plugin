@@ -6,8 +6,8 @@ import type { EngineInterface, PromptSubmitInput, Timer, TurnCompleteInput, Turn
 // or once the session has worked again; a follow-up ping without activity, or one after a handover, is a terse keep-warm turn that
 // keeps the cache and asks for nothing. A handed-over session is sealed: it drops automatic
 // origins, and any other input that is not isMeta wakes it again.
-// The Listener's hooks call the guard first, before any early return, so it covers every session with the plugin whether or not the
-// Listener runs. Its state is its own and reset at session start. A throwing guard never blocks a prompt or a hook.
+// Only a session registered to a Vorhaben is pinged: the Listener's hooks call the guard first, before any early return, and tell it
+// whether the session has a thread. Its state is its own and reset at session start. A throwing guard never blocks a prompt or a hook.
 
 const IDLE_MS = 45 * 60_000
 const HANDOVER_SKILL = 'leitstand:handover'
@@ -22,7 +22,7 @@ const AUTOMATIC_ORIGINS = new Set([
 const SEALED = 'Leitstand Cache-Guard: Diese Session wurde übergeben. Nur Eingaben des Users wecken sie wieder.'
 
 export const PING = `Leitstand Cache-Guard: Diese Session ist seit 45 Minuten inaktiv. Der Prompt-Cache läuft in etwa 15 Minuten ab, danach wird jede Fortsetzung ein teurer Kaltstart. Entscheide jetzt:
-1. Übergeben (Normalfall): Führe den Skill \`leitstand:handover\` aus. Ist die Session noch keinem Vorhaben zugeordnet, lege vorher mit \`leitstand:start\` eines an. Schreibe keinen eigenen Übergabe-Prompt aus dem Chat: Der Skill legt Aufgaben, State und Memories im Leitstand ab und erzeugt den Übergabe-Prompt. Danach nimmt diese Session nur noch Eingaben des Users an.
+1. Übergeben (Normalfall): Führe den Skill \`leitstand:handover\` aus. Schreibe keinen eigenen Übergabe-Prompt aus dem Chat: Der Skill legt Aufgaben, State und Memories im Leitstand ab und erzeugt den Übergabe-Prompt. Danach nimmt diese Session nur noch Eingaben des Users an.
 2. Offen lassen: nur wenn Subagenten oder Hintergrundarbeit noch laufen oder der Kontext wertvoller ist als ein Handover. Antworte dann in einem Satz mit dem Grund und tu sonst nichts. Der nächste Ping kommt in 45 Minuten.`
 
 // The cache stays warm all the same; the agent is told not to repeat its earlier answer.
@@ -81,8 +81,10 @@ export function guardTurnStart(e: Pick<TurnStartInput, 'agentId'>) {
   } catch { /* a broken guard stays out of the way */ }
 }
 
-// `pinged` learns each ping or keep-warm text once it was submitted.
-export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput, 'agentId'>, pinged?: (text: string) => void) {
+// `assigned` tells, when the timer fires, whether the session is registered to a Vorhaben; without one nothing is sent and the timer
+// stays off until the next turn. `pinged` learns each ping or keep-warm text once it was submitted.
+export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput, 'agentId'>, assigned: () => boolean,
+  pinged?: (text: string) => void) {
   try {
     if (e.agentId !== undefined) return
     stop()
@@ -92,7 +94,7 @@ export function guardTurnComplete($: EngineInterface, e: Pick<TurnCompleteInput,
     if (sealed || completed) return
     timer = $.clock.after(IDLE_MS, () => {
       timer = undefined
-      if (sealed) return
+      if (sealed || !assigned()) return
       const text = decisionOpen && !settled ? PING : KEEP_WARM
       decisionOpen = false
       pinging = true

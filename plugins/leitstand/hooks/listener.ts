@@ -711,7 +711,7 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
-    guardTurnComplete($, e, text => void inject($, 'cache-guard', text === PING ? 'idle-ping' : 'keep-warm'))
+    guardTurnComplete($, e, () => S.threads.length > 0, text => void inject($, 'cache-guard', text === PING ? 'idle-ping' : 'keep-warm'))
     const done = await next(e)
     if (e.agentId !== undefined || !S.facts) return done
     S.busy = false
