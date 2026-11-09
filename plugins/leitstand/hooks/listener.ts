@@ -169,16 +169,21 @@ export function normalizeRemote(url: string | null | undefined): string | null {
 
 const bytes = (text: string) => new TextEncoder().encode(text).length
 
-export function wakeMessage(thread: Thread, events: Event[], posts: Record<string, string>, sessionId: string): string {
+// `backlog`: an inherited Post backlog arrives in pages; this one wake names the collective path instead of carrying the Posts.
+export function wakeMessage(thread: Thread, events: Event[], posts: Record<string, string>, sessionId: string, backlog = false): string {
   let head = HEAD
-  if (events.some(e => e.kind === 'post_received')) head += ' Leitstand bestätigt die Post automatisch, sobald dieser Turn endet.'
+  if (backlog)
+    head += ' Es liegt ein Rückstand an Posts vor, den Leitstand nicht automatisch bestätigt. Liste ihn mit tools_call leitstand_post_receive ' +
+      JSON.stringify({ projectId: thread.projectId, threadId: thread.threadId, providerSessionId: sessionId }) +
+      ' (ohne postId); mit acknowledge true quittierst du ihn gesammelt, erst nachdem du ihn gelesen hast.'
+  else if (events.some(e => e.kind === 'post_received')) head += ' Leitstand bestätigt die Post automatisch, sobald dieser Turn endet.'
   if (events.some(e => e.kind.startsWith('repository_fix_')))
     head += ' Fix notices are acknowledged after this turn. On repository_fix_completed resume the blocked work; ' +
       'on repository_fix_overdue inspect the fix, inform the user before takeover (no new approval), and atomically take over with its current claimToken if still overdue; ' +
       'on repository_fix_taken_over stop work under the former claim. A notice itself grants no ownership.'
   const body = events.map(event => {
     const item: Record<string, unknown> = { ...event }
-    if (event.kind === 'post_received') {
+    if (event.kind === 'post_received' && !backlog) {
       item.text = posts[event.id] ?? '(Text nicht abrufbar)'
       item.receive = { tool: 'tools_call', arguments: { name: 'leitstand_post_receive', input: {
         projectId: thread.projectId, threadId: thread.threadId, providerSessionId: sessionId, postId: event.id } } }
@@ -228,6 +233,8 @@ const S = {
   permissionShown: false,
   guidanceInFlight: false,
   hinted: new Set<string>(),
+  // Threads whose inherited Post backlog is still arriving page by page; the first page woke, the rest only advances.
+  backlog: new Set<string>(),
   // Nudges already shown this session (glossary keys and 'artifact'); a many-questions answer waits for the next prompt.
   nudged: new Set<string>(),
   manyQuestions: false,
@@ -469,22 +476,32 @@ async function tick($: EngineInterface, mine: number) {
       S.failures = 0
       // Unacknowledged Posts replay behind the cursor; wake only once per Post or notice.
       const delivered = (await load($)).delivered
-      const events = (value.events as Event[]).filter(e => e && typeof e.id === 'string' && typeof e.kind === 'string'
+      let events = (value.events as Event[]).filter(e => e && typeof e.id === 'string' && typeof e.kind === 'string'
         && !(once(e) && delivered.includes(e.id)))
+      // An answered or returned question changes the band's open count: refresh with the next tick.
+      if (events.some(e => e.kind === 'answer_submitted' || e.kind === 'question_returned')) S.refreshedAt = -Infinity
+      const isPost = (e: Event) => e.kind === 'post_received'
+      // More than one Watch page of Posts is an inherited backlog: one wake names the collective path, the Posts stay unacknowledged for it.
+      const inBacklog = S.backlog.has(slot) || (value.hasMore === true && events.some(isPost))
+      const woken = S.backlog.has(slot)
+      if (inBacklog && value.hasMore === true) S.backlog.add(slot)
+      else S.backlog.delete(slot)
+      const posts: Record<string, string> = {}
+      if (!inBacklog) {
+        for (const event of events.filter(isPost)) {
+          try {
+            const received = await call($, 'leitstand_post_receive', { ...route, postId: event.id, deliveryTarget: 'machine' })
+            posts[event.id] = String(received.text ?? received.body ?? JSON.stringify(received))
+          } catch (error) { if (!(error instanceof ToolError)) throw error }
+        }
+        // A Post whose text could not be read is not processed: it stays unacknowledged and replays behind the cursor.
+        events = events.filter(e => !isPost(e) || e.id in posts)
+      }
       if (!events.length) {
         await update($, state => { state.cursors[slot] = after })
         // Only replayed or filtered events: the server answered at once; wait out the rest of the poll unless more pages follow.
         if (value.events.length && value.hasMore !== true) delay = Math.max(delay, wait - ((await $.clock.now()) - asked))
         continue
-      }
-      // An answered or returned question changes the band's open count: refresh with the next tick.
-      if (events.some(e => e.kind === 'answer_submitted' || e.kind === 'question_returned')) S.refreshedAt = -Infinity
-      const posts: Record<string, string> = {}
-      for (const event of events.filter(e => e.kind === 'post_received')) {
-        try {
-          const received = await call($, 'leitstand_post_receive', { ...route, postId: event.id, deliveryTarget: 'machine' })
-          posts[event.id] = String(received.text ?? received.body ?? JSON.stringify(received))
-        } catch (error) { if (!(error instanceof ToolError)) throw error }
       }
       const fresh: Ack[] = [
         ...Object.keys(posts).map(postId => ({ projectId: thread.projectId, threadId: thread.threadId, postId })),
@@ -496,9 +513,12 @@ async function tick($: EngineInterface, mine: number) {
         state.delivered.push(...events.filter(once).map(e => e.id))
         state.toAck.push(...fresh)
       })
+      // Later pages of a backlog that already woke carry no Posts into a wake.
+      const wakes = woken ? events.filter(e => !isPost(e)) : events
+      if (!wakes.length) continue
       const queued = S.busy
-      await wake($, wakeMessage(thread, events, posts, facts.providerSessionId))
-      for (const event of events) await inject($, event.kind === 'post_received' ? 'post' : 'wake', event.kind, event.id)
+      await wake($, wakeMessage(thread, wakes, posts, facts.providerSessionId, inBacklog))
+      for (const event of wakes) await inject($, event.kind === 'post_received' ? 'post' : 'wake', event.kind, event.id)
       // Submitted to an idle session, the woken turn has started: the next completed turn has processed these.
       // Behind a running turn it is only queued; the next main-loop turn.start arms them instead.
       if (!queued) await update($, state => { for (const item of state.toAck) if (fresh.some(f => sameAck(f, item))) item.armed = true })

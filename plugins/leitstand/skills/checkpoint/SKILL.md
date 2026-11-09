@@ -36,11 +36,11 @@ uses it; never on your own initiative.
 
 ## Persist and verify
 
-5. Save the pending delta to the appropriate task, State, Memory and Tafel
+5. Save the pending delta to the appropriate task, State, Memory and main-artifact
    surfaces as the project's pin requires. Keep plans/results/criterion evidence
    where that pin assigns them; keep O-Ton, decisions and reasons in their owning
-   surface. Avoid routine duplication. Inspect `overviewRequest`; update Tafel
-   only for a material change or a request under the pinned workflow.
+   surface. Avoid routine duplication. Inspect `overviewRequest`; update the selected main artifact body
+   only for a material change or a request under the pinned workflow. Acknowledge an exact pending overviewRequestId only on that successful body update; pass coveredMemoryCursor and coveredStateRevision only for the actual source reads.
 6. Read back every changed surface and compare the intended delta, references
    and returned revisions. A successful write response alone is not proof.
    Refresh runtime/worker evidence if it changed while checkpointing. Resolve
@@ -59,7 +59,7 @@ Return in this order:
 
 1. **Checkpoint:** shared inspection findings in its canonical order, then
    verified project reference/ID, workflow pin, State revision
-   and changed task/Memory/Tafel references with readback evidence. If blocked,
+   and changed task/Memory/artifact references with readback evidence. If blocked,
    identify the last verified checkpoint separately from the pending delta.
 2. **Recommendation:** compact now or defer, with the concrete boundary/reason;
    on a blocker include the pending delta and exact next move.
