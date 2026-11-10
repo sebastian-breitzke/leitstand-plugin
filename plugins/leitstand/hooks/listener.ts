@@ -18,7 +18,7 @@ const PERMISSION = 'Freigabe fehlt: permissions.allow braucht mcp__plugin_leitst
   '/leitstand:start trägt die Regel nach Bestätigung in die Settings ein.'
 
 // Rule-based, non-blocking nudges against drift in a Leitstand-assigned session: local string checks only, no network, no LLM.
-// Each hint reaches the model as hidden context and blocks nothing. They fire only while the session is registered to a Vorhaben.
+// Each hint reaches the model as hidden context and blocks no tool or prompt. They fire only while the session is registered to a Vorhaben.
 const NUDGE = 'Leitstand hint (nothing is blocked): '
 const FRAGERUNDE = 'Open decisions belong in a Fragerunde in Leitstand, not in chat: tools_call leitstand_workflow with section "questions", ' +
   'then leitstand_round and leitstand_question.'
@@ -26,8 +26,11 @@ const PUBLISH = 'Publish it into the Vorhaben with tools_call leitstand_artifact
   'local file, tools_call leitstand_upload_open with the local upload helper, and share the Leitstand URL in your answer.'
 export const ARTIFACT_HINT = NUDGE + 'this session is assigned to a Leitstand Vorhaben; results for the user or the team belong there, not only in the ' +
   'client or on local disk. ' + PUBLISH + ' A copy in the client\'s own artifact tool may stay.'
-export const QUESTION_HINT = NUDGE + 'your previous message asked the user several questions in chat. ' + FRAGERUNDE +
-  ' Move every still-open decision there; plain clarifications may stay in chat.'
+// Sent as the Stop block reason, so the agent fixes its answer before the turn ends. The continuation must say something visible:
+// an empty one makes the host ask again for a visible answer, so a question that stays in chat is restated, not dropped.
+export const QUESTION_REMINDER = 'Leitstand hint: your answer asks the user a question that is not in Für dich. If it is an open decision ' +
+  'or a step for the user, record it there and give the user its Leitstand link. ' + FRAGERUNDE + ' If it is rhetorical or a short ' +
+  'clarification about the current chat, leave it in chat and restate only that question in one line.'
 
 // Magic words the user can say, mirrored by the website page. `terms` match case-insensitively at the start of a word
 // (so "Fragerunden" and "Artefakte" count); `standalone` limits a term to a short message or one that starts with it.
@@ -65,10 +68,15 @@ export function glossaryHints(text: string, seen: Set<string>): string[] {
   return hints
 }
 
-// Question sentences in an assistant message, code blocks and inline code excluded.
+// Question sentences in an assistant message, code blocks, inline code and quoted lines (Markdown `>`) excluded.
 export function countQuestions(answer: string): number {
-  const prose = answer.replace(/```[\s\S]*?(```|$)/g, ' ').replace(/`[^`\n]*`/g, ' ')
+  const prose = answer.replace(/```[\s\S]*?(```|$)/g, ' ').replace(/`[^`\n]*`/g, ' ').replace(/^[ \t]*>.*$/gm, ' ')
   return (prose.match(/\?(?=\s|$|["'’”)\]*_])/g) ?? []).length
+}
+
+// A final answer that asks the user something without a Fragerunden link (`/vorhaben/<id>?runde=`) in it.
+export function unrecordedQuestion(answer: string): boolean {
+  return countQuestions(answer) > 0 && !/\/vorhaben\/[A-Za-z0-9_-]{1,128}\?runde=/.test(answer)
 }
 
 // The Skill `leitstand:checkpoint` ends its own answer after a verified checkpoint with exactly one fenced block whose info string
@@ -243,9 +251,10 @@ const S = {
   hinted: new Set<string>(),
   // Threads whose inherited Post backlog is still arriving page by page; the first page woke, the rest only advances.
   backlog: new Set<string>(),
-  // Nudges already shown this session (glossary keys and 'artifact'); a many-questions answer waits for the next prompt.
+  // Nudges already shown this session (glossary keys and 'artifact').
   nudged: new Set<string>(),
-  manyQuestions: false,
+  // The current main-loop turn recorded a question or round in Leitstand.
+  recorded: false,
   // The band lists every Vorhaben instead of folding those without open questions.
   expanded: false,
   cwd: '',
@@ -701,7 +710,6 @@ async function end($: EngineInterface, sessionId: string, reason: string) {
   stop($)
   S.permissionShown = false
   S.nudged.clear()
-  S.manyQuestions = false
   // The session end carries the events no Guidance read took along.
   const target = eventThread()
   const items = target ? S.events.slice(0, BATCH) : []
@@ -731,6 +739,7 @@ export const register: Register = on => {
     guardTurnStart(e)
     S.busy = true
     S.lastActivity = await $.clock.now()
+    if (e.agentId === undefined) S.recorded = false
     // The turn that starts now is the woken turn of every Post queued behind its predecessor.
     if (e.agentId === undefined && S.facts) await update($, state => { for (const item of state.toAck) item.armed = true })
     // A prompt after idle expiry or a stop re-arms the Listener (hook parity: prompt-submit); a failed start begins again.
@@ -753,7 +762,6 @@ export const register: Register = on => {
     if (e.agentId !== undefined || !S.facts) return done
     S.busy = false
     S.lastActivity = await $.clock.now()
-    if (e.reason === 'answer' && S.threads.length && countQuestions(e.answer) >= 3) S.manyQuestions = true
     // A finished turn has processed the Posts and fix notices it was woken with.
     if (e.reason === 'answer') await acknowledge($)
     return done
@@ -774,6 +782,7 @@ export const register: Register = on => {
     void recordTool($, e as never, at, result.isError === true || result.deny !== undefined)
       .catch(error => note($, 'Ereignis nicht erfasst: ' + message(error)))
     if (e.agentId !== undefined) return result
+    if (/(?:^|__)leitstand_(round|question)$/.test(tool) && result.isError !== true && result.deny === undefined) S.recorded = true
     const hint = S.threads.length && !S.nudged.has('artifact') && artifactCall(e as never) ? ARTIFACT_HINT : undefined
     if (hint) S.nudged.add('artifact')
     if (hint && result.deny === undefined) await inject($, 'hint', 'artifact')
@@ -782,7 +791,17 @@ export const register: Register = on => {
     return hint && result.deny === undefined ? { ...result, context: [...(result.context ?? []), hint] } : result
   })
 
-  // Magic words and a many-questions answer reach the model as hidden context of the user's next prompt.
+  // A main-loop answer that asks the user a question nobody recorded in Für dich this turn holds the turn's end once: the Stop block
+  // hands the agent the reminder in the same turn. Its continuation (stop_hook_active) or another hook's block is never held again.
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    if (e.stop_hook_active || result.block !== undefined || !S.facts || !S.threads.length || S.recorded
+      || !unrecordedQuestion(e.last_assistant_message ?? '')) return result
+    await inject($, 'hint', 'unrecorded-question')
+    return { ...result, block: QUESTION_REMINDER }
+  })
+
+  // Magic words reach the model as hidden context of the user's next prompt.
   on('prompt.submit', async ($, e, next) => {
     const dropped = guardPromptSubmit(e)
     if (dropped) return dropped
@@ -790,8 +809,6 @@ export const register: Register = on => {
     const before = new Set(S.nudged)
     const hints = glossaryHints(e.text, S.nudged)
     for (const key of S.nudged) if (!before.has(key)) await inject($, 'hint', 'glossary:' + key)
-    if (S.manyQuestions) { hints.push(QUESTION_HINT); await inject($, 'hint', 'many-questions') }
-    S.manyQuestions = false
     return next(hints.length ? { ...e, context: [...(e.context ?? []), ...hints] } : e)
   })
 
