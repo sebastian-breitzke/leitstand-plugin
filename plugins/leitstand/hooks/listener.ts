@@ -141,7 +141,7 @@ function absolute(path: string, cwd: string): string | undefined {
   return '/' + parts.join('/')
 }
 
-type Thread = { projectId: string; threadId: string; role?: string; registered?: number; title?: string; openQuestions?: number; url?: string; roundUrl?: string }
+type Thread = { projectId: string; threadId: string; role?: string; registered?: number; title?: string; openQuestions?: number; waiting?: { question: number; todo: number; notice: number }; url?: string; roundUrl?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
 type Saved = { cursors: Record<string, string>; delivered: string[]; guidance: string[]; toAck: Ack[]; updatedAt: number }
 type Facts = { provider: string; providerSessionId: string; host: string; workspace: string; model?: string; effort?: string }
@@ -574,11 +574,13 @@ function restart($: EngineInterface) {
   void (S.facts ? arm($, true) : begin($)).catch(error => note($, 'Neustart fehlgeschlagen: ' + message(error)))
 }
 
-const waiting = (n: number) => n === 1 ? '1 Frage wartet' : `${n} Fragen warten`
+// The marks of "Für dich": ? question, □ Aufgabe (✓ means done there), i Hinweis; only kinds with something waiting.
+const waiting = (w: NonNullable<Thread['waiting']>) =>
+  ([['?', w.question], ['□', w.todo], ['i', w.notice]] as const).filter(([, n]) => n).map(([mark, n]) => `${mark} ${n}`).join('  ')
 
 // The band above the prompt: the dot and the word mark Leitstand with the Listener's state, then the Vorhaben with
-// open questions, most first, each count a warm link to its Fragerunde; the others unfold on request. The dot turns
-// amber while a question waits. One Vorhaben is one line. A stopped Listener shows why and the way back.
+// waiting points, most first, each mark-and-count pair a warm link to its Fragerunde or "Für dich"; the others unfold on
+// request. The dot turns amber while something waits. One Vorhaben is one line. A stopped Listener shows why and the way back.
 // It draws nothing for a session without a Vorhaben and a running Listener.
 function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
@@ -598,9 +600,10 @@ function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']
     Text({ weight: 'semibold', children: 'Leitstand' })]
   const state = Text({ dimColor: true, size: 'footnote', children: S.running ? 'hört zu' : 'ruht bis zur nächsten Nachricht' })
   const title = (t: Thread) => Text({ wrap: 'truncate-end', children: t.title || 'Vorhaben' })
-  // Open questions wait on the person: warm, not alarming, the one colored word in the band, opening the Fragerunde.
-  const count = (t: Thread) => Link({ href: t.roundUrl ?? t.url ?? '',
-    children: Text({ color: 'warning', weight: 'semibold', children: `${waiting(t.openQuestions!)} ›` }) })
+  // Waiting points wait on the person: warm, not alarming, the one colored mark in the band, opening the Fragerunde,
+  // or "Für dich" of the Vorhaben when the waiting work does not lie in exactly one round.
+  const count = (t: Thread) => Link({ href: t.roundUrl ?? (t.url ? t.url + '?panel=rounds' : ''),
+    children: Text({ color: 'warning', weight: 'semibold', children: `${waiting(t.waiting!)} ›` }) })
   const visit = (t: Thread) => t.url ? [Link({ href: t.url, children: Text({ dimColor: true, children: 'öffnen ›' }) })] : []
   if (projects.length === 1) {
     const t = projects[0]!
