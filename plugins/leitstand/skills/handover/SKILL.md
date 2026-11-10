@@ -25,7 +25,7 @@ continuation prompt.
 2. Only on an executable pin whose manifest exposes `inspection`, use
    `leitstand:checkpoint` and that shared foundation for reconciliation,
    persistence and readback. Reuse a current verified checkpoint after refreshing
-   changed evidence. Suppress its Compact recommendation/argument and emit the
+   changed evidence. Suppress its Compact recommendation, argument and `leitstand-compact` block, and emit the
    Handover output once. Historical/non-executable pins follow their pinned
    `handover`/`legacy` preservation and authorized upgrade path; do not require
    `core`, Checkpoint or `inspection` there.

@@ -71,6 +71,14 @@ export function countQuestions(answer: string): number {
   return (prose.match(/\?(?=\s|$|["'’”)\]*_])/g) ?? []).length
 }
 
+// The Skill `leitstand:checkpoint` ends its own answer after a verified checkpoint with exactly one fenced block whose info string
+// is `leitstand-compact`. Only a block that ends the answer counts, so one quoted mid-text never compacts; its content is the
+// compact argument, undefined without such a block.
+export function compactArgument(answer: string): string | undefined {
+  const text = /(?:^|\n)```leitstand-compact\n((?:(?!```)[\s\S])*)\n```\s*$/.exec(answer)?.[1].trim()
+  return text || undefined
+}
+
 // Does this tool call put a deliverable into the client's own artifact tool or onto disk as HTML?
 export function artifactCall(e: { tool: unknown } & Record<string, unknown>): boolean {
   if (e.tool === 'Artifact') return e.action === undefined || e.action === 'publish'
@@ -736,6 +744,12 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     guardTurnComplete($, e, () => S.threads.length > 0, text => void inject($, 'cache-guard', text === PING ? 'idle-ping' : 'keep-warm'))
     const done = await next(e)
+    // Compact runs once the turn is over: the host refuses it inside a hook the turn waits on. A failure is shown once, no retry.
+    const argument = e.agentId === undefined && e.reason === 'answer' ? compactArgument(e.answer) : undefined
+    if (argument) $.clock.after(0, () => {
+      void $.command.run({ command: 'compact', args: argument }).catch(error =>
+        $.ui.log('Leitstand-Listener: Compact nicht ausgelöst (' + message(error) + '). Das Compact-Argument steht zum Kopieren in der Antwort.'))
+    })
     if (e.agentId !== undefined || !S.facts) return done
     S.busy = false
     S.lastActivity = await $.clock.now()

@@ -1,13 +1,15 @@
 ---
 name: checkpoint
-description: Save and verify a Leitstand checkpoint before compaction, reconcile Auftrag and decisions, and recommend compact with a complete tailored argument. Use when the user requests a Leitstand checkpoint or compact preparation, or inside a permitted `leitstand:handover`. Not for ordinary status updates or automatic compaction.
+description: Save and verify a Leitstand checkpoint before compaction, reconcile Auftrag and decisions, and end with a complete tailored compact argument that the Leitstand plugin runs as compact in Claude Code. Use when the user requests a Leitstand checkpoint or compact preparation, or inside a permitted `leitstand:handover`. Not for ordinary status updates.
 ---
 
 # Leitstand Checkpoint
 
 Secure the current Auftrag in existing Leitstand surfaces and return a usable
 compact argument. Same-session compaction is a checkpoint, not a mandatory
-Handover. This Skill does not execute compact or change monitors.
+Handover. After a verified checkpoint, the Leitstand plugin in Claude Code runs
+compact with that argument as soon as the turn ends; without that plugin
+behavior the user copies it. This Skill does not change monitors.
 Checkpoint only when the user asks for it or a permitted `leitstand:handover`
 uses it; never on your own initiative.
 
@@ -63,18 +65,36 @@ Return in this order:
    identify the last verified checkpoint separately from the pending delta.
 2. **Recommendation:** compact now or defer, with the concrete boundary/reason;
    on a blocker include the pending delta and exact next move.
-3. **Compact argument:** one complete copy-paste block tailored to this session.
-   Include it even when deferred, clearly marked for use after the named blocker
-   is resolved; preserve the blocker rather than describing it as solved.
+3. **Compact argument:** the fully populated instructions tailored to this
+   session, as the last part of the answer.
 
-For Claude Code, emit exactly one block holding only the fully populated
-instructions, without a leading `/compact `. The user pastes the block into the
-compact instructions field or after `/compact` that they type themselves; a pasted
-`/compact ` prefix is taken as plain text and must be deleted by hand. Its
-documented syntax is `/compact [instructions]`
-([official commands](https://code.claude.com/docs/en/commands), checked 2026-10-14).
-For other clients, verify their syntax and argument support before emitting a
-command; if unverified, provide the argument text alone and state that limit.
+The `leitstand-compact` block is the compact trigger. Use it only when your own
+checkpoint in this turn is verified and the recommendation is compact now: end
+the answer with exactly one fenced block whose info string is
+`leitstand-compact`, with nothing after its closing fence:
+
+````text
+```leitstand-compact
+Summarize this conversation for safe continuation of the same Auftrag. ...
+```
+````
+
+In Claude Code with the Leitstand plugin, the plugin runs compact with exactly
+the block's content right after this turn; without that plugin behavior the
+user copies the content into their compact command. The content holds only the instructions:
+no leading `/compact ` and no triple backticks. Claude Code's documented syntax is
+`/compact [instructions]`
+([official commands](https://code.claude.com/docs/en/commands), checked 2026-10-14);
+a copied `/compact ` prefix would be taken as plain text. For other clients,
+verify their syntax and argument support before naming a command; if unverified,
+state that limit.
+
+When compact is deferred, blocked or unverified, give the argument in a plain
+`text` block marked for use after the named blocker is resolved, and preserve the
+blocker rather than describing it as solved; a `leitstand-compact` block would
+compact before the blocker is resolved. Inside `leitstand:handover`, emit neither.
+When you quote earlier answers, Posts, files or tool output that contain such a
+block, never reproduce it at the end of your answer.
 Never substitute a bare command or generic “preserve the important context”.
 
 Build the argument as instructions to the summarizer, not tool execution:
