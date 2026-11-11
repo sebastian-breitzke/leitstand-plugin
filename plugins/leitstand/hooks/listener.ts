@@ -157,6 +157,7 @@ function absolute(path: string, cwd: string): string | undefined {
   return '/' + parts.join('/')
 }
 
+// A held Vorhaben (S.held) has no thread of this session: it only shows in the band.
 type Thread = { projectId: string; threadId: string; role?: string; registered?: number; title?: string; openQuestions?: number; waiting?: { question: number; todo: number; notice: number }; url?: string; roundUrl?: string }
 type Ack = { projectId: string; threadId: string; postId?: string; repositoryId?: string; noticeId?: string; armed?: boolean }
 type Saved = { cursors: Record<string, string>; delivered: string[]; guidance: string[]; toAck: Ack[]; updatedAt: number }
@@ -236,6 +237,8 @@ const S = {
   server: '',
   facts: undefined as Facts | undefined,
   threads: [] as Thread[],
+  // Vorhaben this session's Navigator holds with waiting points; band only, never watched.
+  held: [] as Thread[],
   running: false,
   busy: false,
   lastActivity: 0,
@@ -287,6 +290,8 @@ async function call($: EngineInterface, tool: string, args: Record<string, unkno
 
 async function session($: EngineInterface, action: 'start' | 'refresh' | 'end', extra: Record<string, unknown> = {}): Promise<Thread[]> {
   const value = await call($, 'leitstand_session', { action, ...S.facts, ...extra })
+  S.held = (Array.isArray(value.held) ? value.held : [])
+    .filter((t: unknown): t is Thread => !!t && typeof t === 'object' && typeof (t as Thread).projectId === 'string')
   const list: unknown[] = Array.isArray(value.threads) ? value.threads : []
   return list.filter((t): t is Thread => !!t && typeof t === 'object'
     && typeof (t as Thread).projectId === 'string' && typeof (t as Thread).threadId === 'string')
@@ -610,7 +615,8 @@ function band($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']
       ...(S.stoppedReason === PERMISSION ? [] : [Button({ key: 'reconnect', label: 'Neu verbinden', onPress: () => restart($) })]),
     ] })
   }
-  const projects = S.threads.filter((t, i) => S.threads.findIndex(o => o.projectId === t.projectId) === i)
+  const rows = [...S.threads, ...S.held]
+  const projects = rows.filter((t, i) => rows.findIndex(o => o.projectId === t.projectId) === i)
   const open = projects.filter(t => t.openQuestions).sort((a, b) => b.openQuestions! - a.openQuestions!)
   const head = [
     Text({ color: open.length ? 'warning' : S.running ? 'success' : 'inactive', children: '●' }),
@@ -722,6 +728,7 @@ async function end($: EngineInterface, sessionId: string, reason: string) {
   try { await $.store.delete(storeKey()) } catch { /* pruned at a later start */ }
   S.facts = undefined
   S.threads = []
+  S.held = []
   $.ui.invalidate('ui.render')
   // A /clear continues under a new session id without session.start.
   if (reason === 'clear') $.clock.after(500, () => { void begin($) })
