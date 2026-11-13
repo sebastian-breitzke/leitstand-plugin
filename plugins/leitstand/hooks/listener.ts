@@ -406,7 +406,7 @@ async function run($: EngineInterface, argv: string[]): Promise<string> {
 async function sessionFacts($: EngineInterface): Promise<Facts> {
   const cwd = await $.session.cwd()
   S.cwd = cwd
-  const host = (await run($, ['scutil', '--get', 'LocalHostName'])) || (await run($, ['hostname', '-s']))
+  const host = (await run($, ['scutil', '--get', 'LocalHostName'])) || (await run($, ['hostname', '-s'])) || (await $.env.get('COMPUTERNAME')) || ''
   let workspace = normalizeRemote(await run($, ['git', '-C', cwd, 'remote', 'get-url', 'origin']))
   if (!workspace) {
     try { workspace = (await $.fs.stat(cwd, { resolve: true })).realPath ?? cwd } catch { workspace = cwd }
